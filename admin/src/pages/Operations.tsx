@@ -11,6 +11,36 @@ export interface PageProps {
 
 type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
+interface KpiTheme {
+  card: string
+  ring: string
+  strip: string
+  ghost: string
+  badge: string
+  label: string
+  pill: string
+}
+
+// Full class strings (Tailwind only generates classes it can see in the source)
+const KPI_THEMES: Record<'emerald' | 'sky' | 'amber' | 'violet', KpiTheme> = {
+  emerald: {
+    card: 'from-white to-emerald-50/70', ring: 'ring-emerald-100', strip: 'from-emerald-500 to-teal-400',
+    ghost: 'text-emerald-500/10', badge: 'from-emerald-500 to-emerald-700', label: 'text-emerald-700', pill: 'bg-emerald-100/80 text-emerald-800',
+  },
+  sky: {
+    card: 'from-white to-sky-50/70', ring: 'ring-sky-100', strip: 'from-sky-500 to-cyan-400',
+    ghost: 'text-sky-500/10', badge: 'from-sky-500 to-sky-700', label: 'text-sky-700', pill: 'bg-sky-100/80 text-sky-800',
+  },
+  amber: {
+    card: 'from-white to-amber-50/70', ring: 'ring-amber-100', strip: 'from-amber-500 to-orange-400',
+    ghost: 'text-amber-500/10', badge: 'from-amber-500 to-orange-600', label: 'text-amber-700', pill: 'bg-amber-100/80 text-amber-900',
+  },
+  violet: {
+    card: 'from-white to-violet-50/70', ring: 'ring-violet-100', strip: 'from-violet-500 to-fuchsia-400',
+    ghost: 'text-violet-500/10', badge: 'from-violet-500 to-violet-700', label: 'text-violet-700', pill: 'bg-violet-100/80 text-violet-800',
+  },
+}
+
 const online = (m: MachineRow) => !!m.last_seen_at && Date.now() - new Date(m.last_seen_at).getTime() < 120_000
 
 export function Overview({ go }: PageProps) {
@@ -19,12 +49,12 @@ export function Overview({ go }: PageProps) {
   const { data: alerts } = usePoll<AlertRow[]>('/alerts?status=OPEN&limit=5')
   const active = (machines ?? []).filter((m) => m.active)
 
-  const kpis: { label: string; value: ReactNode; sub: string; icon: Icon; tone: string; page: string }[] = s
+  const kpis: { label: string; value: ReactNode; sub: string; icon: Icon; theme: KpiTheme; page: string }[] = s
     ? [
-        { label: 'Refunded today', value: rupees(s.amount_refunded_today_paise), sub: `${s.refunds_success_today} successful payouts`, icon: RupeeIcon, tone: 'bg-emerald-50 text-emerald-700', page: 'transactions' },
-        { label: 'Bottles accepted', value: s.bottles_accepted_today, sub: `${s.sessions_today} bottles inserted today`, icon: BottleIcon, tone: 'bg-sky-50 text-sky-700', page: 'sessions' },
-        { label: 'Bottles returned', value: s.bottles_returned_today, sub: 'Rejected or cancelled today', icon: ReturnIcon, tone: 'bg-slate-100 text-slate-600', page: 'sessions' },
-        { label: 'Machines online', value: `${s.machines_online} / ${s.machines_total}`, sub: 'Reported in the last 2 minutes', icon: WifiIcon, tone: 'bg-violet-50 text-violet-700', page: 'machines' },
+        { label: 'Refunded today', value: rupees(s.amount_refunded_today_paise), sub: `${s.refunds_success_today} successful payouts`, icon: RupeeIcon, theme: KPI_THEMES.emerald, page: 'transactions' },
+        { label: 'Bottles accepted', value: s.bottles_accepted_today, sub: `${s.sessions_today} bottles inserted today`, icon: BottleIcon, theme: KPI_THEMES.sky, page: 'sessions' },
+        { label: 'Bottles returned', value: s.bottles_returned_today, sub: 'Rejected or cancelled today', icon: ReturnIcon, theme: KPI_THEMES.amber, page: 'sessions' },
+        { label: 'Machines online', value: `${s.machines_online} / ${s.machines_total}`, sub: 'Reported in the last 2 minutes', icon: WifiIcon, theme: KPI_THEMES.violet, page: 'machines' },
       ]
     : []
   const health: { label: string; value: number; icon: Icon; tone: string; page: string }[] = s
@@ -50,13 +80,27 @@ export function Overview({ go }: PageProps) {
 
       <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 xl:grid-cols-4">
         {kpis.map((k) => (
-          <button key={k.label} onClick={() => go(k.page)} className="rounded-2xl bg-white p-5 text-left shadow-sm ring-1 ring-slate-200 transition hover:shadow-md hover:ring-slate-300">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-slate-500">{k.label}</p>
-              <span className={`flex h-10 w-10 items-center justify-center rounded-xl ${k.tone}`}><k.icon className="h-5 w-5" /></span>
+          <button
+            key={k.label}
+            onClick={() => go(k.page)}
+            className={`group relative overflow-hidden rounded-2xl bg-gradient-to-br ${k.theme.card} p-5 text-left shadow-sm ring-1 ${k.theme.ring} transition hover:-translate-y-0.5 hover:shadow-lg`}
+          >
+            {/* accent strip */}
+            <span className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${k.theme.strip}`} />
+            {/* large faded icon */}
+            <k.icon className={`pointer-events-none absolute -right-4 -bottom-5 h-28 w-28 ${k.theme.ghost}`} strokeWidth={1.2} />
+
+            <div className="relative flex items-center gap-3">
+              <span className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br ${k.theme.badge} text-white shadow-md`}>
+                <k.icon className="h-5 w-5" strokeWidth={2.2} />
+              </span>
+              <p className={`text-[13px] font-bold tracking-wider uppercase ${k.theme.label}`}>{k.label}</p>
             </div>
-            <p className="mt-3 text-3xl font-bold tracking-tight text-slate-900 tabular-nums">{k.value}</p>
-            <p className="mt-1 text-xs text-slate-500">{k.sub}</p>
+            <p className="relative mt-4 text-4xl font-extrabold tracking-tight text-slate-900 tabular-nums">{k.value}</p>
+            <div className="relative mt-3 flex items-center justify-between">
+              <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${k.theme.pill}`}>{k.sub}</span>
+              <span className={`text-sm font-semibold opacity-0 transition group-hover:opacity-100 ${k.theme.label}`}>View →</span>
+            </div>
           </button>
         ))}
       </div>
