@@ -117,6 +117,23 @@ In the kiosk, the **DEV** button (bottom right, simulation only) inserts test bo
 scan or spoken number, presses the e-stop, and refreshes test QR codes.
 Without a browser: `cd machine && .venv/Scripts/python tools/kiosk_smoke.py --bottles 13`.
 
+### Voice prompts (Sarvam AI)
+
+Every kiosk instruction is spoken in the language selected on screen (Tamil / English). The audio is
+generated once with Sarvam AI (`bulbul:v3`) and shipped with the kiosk, so the machine needs no internet
+or API key to speak.
+
+```bash
+cd kiosk
+# put SARVAM_API_KEY=... in kiosk/.env.local (git-ignored)
+npm run voice -- --samples                                # listen to public/voice/_samples, pick a voice
+npm run voice -- --speaker-ta kavitha --speaker-en kavitha
+npm run voice                                             # after editing voice-prompts.json: only changed clips
+```
+
+Texts live in `kiosk/voice-prompts.json`. On the machine, Chromium must run with
+`--autoplay-policy=no-user-gesture-required`; the 🔊 button in the kiosk header mutes the voice.
+
 Voice input uses the browser Web Speech API (Chrome, needs internet). For the offline machine this will be
 replaced by on-device speech-to-text (Vosk / faster-whisper) behind the same screen.
 

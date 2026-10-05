@@ -22,3 +22,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Sarvam voice samples / comparisons (only for choosing a voice)
+public/voice/_samples/

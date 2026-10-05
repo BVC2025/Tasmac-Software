@@ -1,11 +1,27 @@
 import { useEffect, useRef } from 'react'
 import { Clock } from './components/Clock'
 import { DevPanel } from './components/DevPanel'
-import { BottleIcon } from './components/Icons'
+import { BottleIcon, SpeakerIcon, SpeakerOffIcon } from './components/Icons'
 import { LangProvider, useLang } from './i18n'
 import { Confirm, RefundMethod, Result } from './screens/RefundFlow'
 import { Checking, Connecting, isCheckingState, OutOfService, Paying, Ready, Rejecting, Starting } from './screens/StatusScreens'
 import { useMachine, type MachineView } from './useMachine'
+import { cueFor, useVoice, VoiceProvider } from './voice'
+
+function VoiceToggle() {
+  const { enabled, available, blocked, toggle } = useVoice()
+  if (!available) return null
+  return (
+    <button
+      onClick={toggle}
+      aria-label={enabled ? 'Mute voice' : 'Unmute voice'}
+      className={`relative flex h-14 w-14 items-center justify-center rounded-full ${enabled ? 'bg-white/15' : 'bg-white/5 text-white/60'}`}
+    >
+      {enabled ? <SpeakerIcon className="h-7 w-7" /> : <SpeakerOffIcon className="h-7 w-7" />}
+      {enabled && blocked && <span className="absolute top-2 right-2 h-3 w-3 animate-pulse rounded-full bg-accent" />}
+    </button>
+  )
+}
 
 function Header({ view }: { view: MachineView }) {
   const { t, lang, setLang } = useLang()
@@ -21,6 +37,8 @@ function Header({ view }: { view: MachineView }) {
         </div>
       </div>
       <Clock />
+      <div className="flex items-center gap-3">
+      <VoiceToggle />
       <div className="flex rounded-full bg-white/15 p-1">
         {(['ta', 'en'] as const).map((l) => (
           <button
@@ -31,6 +49,7 @@ function Header({ view }: { view: MachineView }) {
             {l === 'ta' ? 'தமிழ்' : 'English'}
           </button>
         ))}
+      </div>
       </div>
     </header>
   )
@@ -56,15 +75,31 @@ function Kiosk() {
   const [view, clearResult] = useMachine()
   const { setLang } = useLang()
 
-  // Back to Tamil for the next customer
+  const voice = useVoice()
+
+  // Back to Tamil for the next customer (silently: the old prompt must not replay)
   const hadResult = useRef(false)
   useEffect(() => {
     if (view.result) hadResult.current = true
     else if (hadResult.current) {
       hadResult.current = false
+      voice.forget()
       setLang('ta')
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.result, setLang])
+
+  // Spoken guidance: one clip per new instruction, in the selected language.
+  // Played a tick later so a language reset in the same update is applied first.
+  const cue = cueFor(view)
+  const cueKey = cue?.key
+  const cueClip = cue?.clip
+  useEffect(() => {
+    if (!cueClip) return
+    const t = window.setTimeout(() => voice.play(cueClip), 60)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cueKey])
 
   return (
     <div className="flex h-full flex-col">
@@ -80,7 +115,9 @@ function Kiosk() {
 export default function App() {
   return (
     <LangProvider>
-      <Kiosk />
+      <VoiceProvider>
+        <Kiosk />
+      </VoiceProvider>
     </LangProvider>
   )
 }

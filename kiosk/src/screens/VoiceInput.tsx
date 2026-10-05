@@ -5,6 +5,7 @@ import { MicIcon } from '../components/Icons'
 import { useLang } from '../i18n'
 import { spokenToDigits } from '../lib/speechNumbers'
 import { normalizeMobile } from '../lib/upi'
+import { useVoice } from '../voice'
 
 // Minimal Web Speech API typings (not in every TS DOM lib)
 interface SpeechResultList {
@@ -38,6 +39,7 @@ const getRecognition = (): RecognitionCtor | null => {
  */
 export function VoiceInput({ onResult, onTypeInstead }: { onResult: (mobile: string) => void; onTypeInstead: () => void }) {
   const { t, lang } = useLang()
+  const voice = useVoice()
   const Ctor = getRecognition()
   const recRef = useRef<Recognition | null>(null)
   const [listening, setListening] = useState(false)
@@ -78,8 +80,13 @@ export function VoiceInput({ onResult, onTypeInstead }: { onResult: (mobile: str
   useEffect(() => {
     const onSim = (e: Event) => apply((e as CustomEvent<string>).detail)
     window.addEventListener('kiosk:voice', onSim)
-    if (Ctor) start()
+    // Speak the instruction first; listening during the prompt would hear the machine itself
+    let closed = false
+    voice.play('voice_say_number').then(() => {
+      if (!closed && Ctor) start()
+    })
     return () => {
+      closed = true
       window.removeEventListener('kiosk:voice', onSim)
       recRef.current?.abort()
     }
@@ -87,6 +94,12 @@ export function VoiceInput({ onResult, onTypeInstead }: { onResult: (mobile: str
   }, [])
 
   const mobile = normalizeMobile(digits)
+
+  // Ask the customer to check the number once it is complete
+  useEffect(() => {
+    if (mobile) voice.play('voice_confirm_number')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mobile])
 
   return (
     <div className="flex w-full flex-col items-center gap-6">
@@ -112,7 +125,7 @@ export function VoiceInput({ onResult, onTypeInstead }: { onResult: (mobile: str
         <div className="w-full space-y-3">
           <p className="text-center text-2xl font-bold text-brand-900">{t.voiceIsCorrect}</p>
           <div className="grid grid-cols-2 gap-4">
-            <Button variant="secondary" onClick={start} disabled={!Ctor}>
+            <Button variant="secondary" onClick={() => { voice.stop(); start() }} disabled={!Ctor}>
               {t.voiceRetry}
             </Button>
             <Button onClick={() => onResult(mobile)}>{t.next}</Button>

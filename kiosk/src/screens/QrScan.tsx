@@ -4,6 +4,7 @@ import { Banner, Button } from '../components/ui'
 import { CheckIcon, QrIcon } from '../components/Icons'
 import { useLang } from '../i18n'
 import { parseUpiQr, type UpiTarget } from '../lib/upi'
+import { useVoice } from '../voice'
 
 /**
  * Reads a UPI QR from:
@@ -18,15 +19,19 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
   const [found, setFound] = useState<UpiTarget | null>(null)
   const [invalid, setInvalid] = useState(false)
 
+  const { play } = useVoice()
   const handle = useCallback((text: string) => {
     const target = parseUpiQr(text)
     if (target) {
-      setFound(target)
+      setFound((prev) => {
+        if (!prev) play('qr_found')
+        return target
+      })
       setInvalid(false)
     } else {
       setInvalid(true)
     }
-  }, [])
+  }, [play])
 
   // Camera scanning
   useEffect(() => {

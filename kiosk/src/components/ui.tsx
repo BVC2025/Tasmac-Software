@@ -1,5 +1,6 @@
-import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from 'react'
 import { useLang } from '../i18n'
+import { useVoice } from '../voice'
 import { ClockIcon } from './Icons'
 
 type Variant = 'primary' | 'secondary' | 'ghost' | 'danger'
@@ -40,14 +41,22 @@ export function Title({ children, sub }: { children: ReactNode; sub?: ReactNode 
 /** Time left for customer input, based on when the machine entered the state. */
 export function Countdown({ seconds, since }: { seconds?: number; since: number }) {
   const { t } = useLang()
+  const { play } = useVoice()
   const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
     const id = window.setInterval(() => setNow(Date.now()), 500)
     return () => window.clearInterval(id)
   }, [])
-  if (!seconds) return null
-  const left = Math.max(0, Math.ceil(seconds - (now - since) / 1000))
+  const left = seconds ? Math.max(0, Math.ceil(seconds - (now - since) / 1000)) : 0
   const urgent = left <= 15
+  const warned = useRef(false)
+  useEffect(() => {
+    if (seconds && urgent && left > 0 && !warned.current) {
+      warned.current = true
+      play('hurry')
+    }
+  }, [seconds, urgent, left, play])
+  if (!seconds) return null
   return (
     <div
       className={`inline-flex items-center gap-2 rounded-full px-4 py-1.5 text-lg font-semibold tabular-nums ${

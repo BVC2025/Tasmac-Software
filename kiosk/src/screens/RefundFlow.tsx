@@ -1,9 +1,10 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { api, type InputSource } from '../api'
 import { Banner, Button, Countdown, Screen, Spinner, Title } from '../components/ui'
 import { ArrowLeftIcon, CheckIcon, ClockIcon, KeypadIcon, MicIcon, QrIcon, SmsIcon } from '../components/Icons'
 import { useLang } from '../i18n'
 import { normalizeMobile } from '../lib/upi'
+import { useVoice } from '../voice'
 import type { MachineView, SessionResult } from '../useMachine'
 import { KeypadInput, SmsMobileStep } from './KeypadInput'
 import { QrScan } from './QrScan'
@@ -18,6 +19,14 @@ type Step = 'choose' | 'qr' | 'voice' | 'keypad' | 'sms'
 export function RefundMethod({ view }: { view: MachineView }) {
   const { t, reason } = useLang()
   const [step, setStep] = useState<Step>('choose')
+  const voice = useVoice()
+  // 'choose' is announced by the machine-state cue, 'voice' by VoiceInput itself
+  const STEP_CLIP: Partial<Record<Step, string>> = { qr: 'qr_show', keypad: 'keypad_enter', sms: 'sms_optional' }
+  useEffect(() => {
+    const clip = STEP_CLIP[step]
+    if (clip) voice.play(clip)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step])
   const [pendingUpi, setPendingUpi] = useState<{ vpa: string; source: InputSource } | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)

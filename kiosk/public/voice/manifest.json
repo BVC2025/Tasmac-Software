@@ -1,0 +1,157 @@
+{
+  "model": "bulbul:v3",
+  "speakers": {
+    "ta": "kavitha",
+    "en": "kavitha"
+  },
+  "pace": 1,
+  "sample_rate": 24000,
+  "codec": "mp3",
+  "generated_at": "2026-10-05T09:06:08.969Z",
+  "clips": {
+    "insert_bottle": {
+      "ta": "6dbb974f0484",
+      "en": "3a634f1ce6e1"
+    },
+    "checking": {
+      "ta": "9247d75d2fb2",
+      "en": "f8780838c9dc"
+    },
+    "remove_hand": {
+      "ta": "64081d60b1a6",
+      "en": "2b9a70684d6d"
+    },
+    "choose_method": {
+      "ta": "e8d40d8332b9",
+      "en": "8b5438950d51"
+    },
+    "qr_show": {
+      "ta": "ded0fee95d2d",
+      "en": "37ce51e05f82"
+    },
+    "qr_found": {
+      "ta": "8b7eda3e9c4e",
+      "en": "9bf39159673b"
+    },
+    "voice_say_number": {
+      "ta": "25af9e4bcdc7",
+      "en": "4c6e3cc0feef"
+    },
+    "voice_confirm_number": {
+      "ta": "7248d1af938c",
+      "en": "a77f91069ab5"
+    },
+    "keypad_enter": {
+      "ta": "4c00cb08ba3e",
+      "en": "3cdd8dcc3225"
+    },
+    "sms_optional": {
+      "ta": "a2fd9cf287ae",
+      "en": "8babd4e7db80"
+    },
+    "error_invalid_destination": {
+      "ta": "525fe389c500",
+      "en": "f6f77b580665"
+    },
+    "error_destination_not_found": {
+      "ta": "6b9a31a6e1c3",
+      "en": "5a2d0268bf56"
+    },
+    "error_invalid_sms_mobile": {
+      "ta": "2506ef66a3fa",
+      "en": "eca629f8355c"
+    },
+    "confirm_refund": {
+      "ta": "cc9e3dd8d26d",
+      "en": "139ebdb9bd80"
+    },
+    "paying": {
+      "ta": "de91aaa32331",
+      "en": "a879e6525e13"
+    },
+    "success": {
+      "ta": "852f12dfc2b7",
+      "en": "990d1f54db86"
+    },
+    "pending": {
+      "ta": "03f2aac42afc",
+      "en": "a8f9d0b789bd"
+    },
+    "cancelled": {
+      "ta": "ea175cb3259c",
+      "en": "097efe2e7150"
+    },
+    "out_of_service": {
+      "ta": "8ef182d42e2b",
+      "en": "13de29777c6f"
+    },
+    "hurry": {
+      "ta": "ae764a298dda",
+      "en": "e90f952c0d06"
+    },
+    "reject_BOTTLE_DAMAGED": {
+      "ta": "edfa0a50c6a4",
+      "en": "bd4e30c8a89f"
+    },
+    "reject_BOTTLE_FOREIGN": {
+      "ta": "0cc88367db99",
+      "en": "34171a9af6d8"
+    },
+    "reject_REFUND_QR_NOT_FOUND": {
+      "ta": "463717ac391e",
+      "en": "6703ac904dc2"
+    },
+    "reject_REFUND_QR_INVALID": {
+      "ta": "8f443b95e704",
+      "en": "01bd842c19dd"
+    },
+    "reject_REFUND_QR_ALREADY_USED": {
+      "ta": "8e2d39949c0a",
+      "en": "5f4ba5271520"
+    },
+    "reject_IN_USE": {
+      "ta": "ce77291bc8a8",
+      "en": "1f650ae7448d"
+    },
+    "reject_MFG_QR_NOT_FOUND": {
+      "ta": "618091b5420a",
+      "en": "c5d7d3e939f5"
+    },
+    "reject_MFG_QR_INVALID": {
+      "ta": "b317a8a88b6b",
+      "en": "650c86e4cbcc"
+    },
+    "reject_BRAND_NOT_ELIGIBLE": {
+      "ta": "4d808771c435",
+      "en": "a678e1e412e8"
+    },
+    "reject_BOTTLE_ALREADY_RETURNED": {
+      "ta": "4bc3a4120d23",
+      "en": "9971321ad801"
+    },
+    "reject_INVALID_DESTINATION": {
+      "ta": "acf63430ba41",
+      "en": "78ec8e9b08ee"
+    },
+    "reject_CUSTOMER_TIMEOUT": {
+      "ta": "135e155bbf46",
+      "en": "9f6f7603cb1b"
+    },
+    "reject_PAYOUT_FAILED": {
+      "ta": "41f03b0cc0b4",
+      "en": "c7bf8523c65d"
+    },
+    "reject_PAYOUT_PENDING": {
+      "ta": "cf0a84418c12",
+      "en": "1f5f83ff63c1"
+    },
+    "reject_BACKEND_UNAVAILABLE": {
+      "ta": "fb6d6c434ae2",
+      "en": "ea8542275432"
+    },
+    "reject_default": {
+      "ta": "ad6145402df3",
+      "en": "3bd0425e5bf7"
+    }
+  }
+}

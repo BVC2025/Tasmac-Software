@@ -1,0 +1,149 @@
+{
+  "_comment": "Spoken instructions for the kiosk. Edit text here, then run: npm run voice  (only changed clips are regenerated). Amounts are written as words so the voice reads them naturally.",
+  "prompts": {
+    "insert_bottle": {
+      "ta": "வணக்கம்! காலி பாட்டிலை கீழே உள்ள திறப்பில் வைக்கவும். ஒவ்வொரு தகுதியான பாட்டிலுக்கும் பத்து ரூபாய் பெறுங்கள்.",
+      "en": "Welcome! Please place your empty bottle in the opening below. You get ten rupees for every eligible bottle."
+    },
+    "checking": {
+      "ta": "உங்கள் பாட்டில் சரிபார்க்கப்படுகிறது. சில வினாடிகள் காத்திருக்கவும்.",
+      "en": "Checking your bottle. Please wait a few seconds."
+    },
+    "remove_hand": {
+      "ta": "தயவுசெய்து திறப்பிலிருந்து கையை எடுக்கவும்.",
+      "en": "Please remove your hand from the opening."
+    },
+    "choose_method": {
+      "ta": "உங்கள் பாட்டில் ஏற்கப்பட்டது. பத்து ரூபாயை எப்படிப் பெற விரும்புகிறீர்கள்? UPI QR ஸ்கேன், மொபைல் எண்ணைச் சொல்லுதல், அல்லது தட்டச்சு செய்தல், இவற்றில் ஒன்றைத் தேர்ந்தெடுக்கவும்.",
+      "en": "Your bottle is accepted. How would you like to receive ten rupees? Choose scan UPI QR, speak your mobile number, or type it."
+    },
+    "qr_show": {
+      "ta": "உங்கள் UPI செயலியின் QR குறியீட்டை கேமராவின் முன் காட்டவும்.",
+      "en": "Show the QR code from your UPI app in front of the camera."
+    },
+    "qr_found": {
+      "ta": "UPI ஐடி கண்டறியப்பட்டது. சரியாக இருந்தால், இதைப் பயன்படுத்து பொத்தானை அழுத்தவும்.",
+      "en": "UPI ID found. If it is correct, press use this."
+    },
+    "voice_say_number": {
+      "ta": "உங்கள் UPI இணைக்கப்பட்ட மொபைல் எண்ணை, ஒவ்வொரு இலக்கமாகச் சொல்லவும்.",
+      "en": "Please say your UPI linked mobile number, one digit at a time."
+    },
+    "voice_confirm_number": {
+      "ta": "இந்த எண் சரியா? சரி என்றால், தொடரவும் பொத்தானை அழுத்தவும்.",
+      "en": "Is this number correct? If yes, press continue."
+    },
+    "keypad_enter": {
+      "ta": "உங்கள் மொபைல் எண் அல்லது UPI ஐடியை உள்ளிடவும்.",
+      "en": "Enter your mobile number or UPI ID."
+    },
+    "sms_optional": {
+      "ta": "SMS ரசீது பெற, உங்கள் மொபைல் எண்ணை உள்ளிடவும். வேண்டாம் என்றால், தவிர் பொத்தானை அழுத்தவும்.",
+      "en": "To get an SMS receipt, enter your mobile number. Otherwise, press skip."
+    },
+    "error_invalid_destination": {
+      "ta": "இந்த UPI ஐடி அல்லது மொபைல் எண் சரியில்லை. மீண்டும் முயற்சிக்கவும்.",
+      "en": "That UPI ID or mobile number is not valid. Please try again."
+    },
+    "error_destination_not_found": {
+      "ta": "இதற்கு UPI கணக்கு இல்லை. வேறு UPI ஐடி அல்லது எண்ணை முயற்சிக்கவும்.",
+      "en": "No UPI account was found for this. Please try another UPI ID or number."
+    },
+    "error_invalid_sms_mobile": {
+      "ta": "SMS மொபைல் எண் சரியில்லை. மீண்டும் முயற்சிக்கவும்.",
+      "en": "The SMS mobile number is not valid. Please try again."
+    },
+    "confirm_refund": {
+      "ta": "விவரங்களைச் சரிபார்த்து, பத்து ரூபாய் பெற உறுதிசெய் பொத்தானை அழுத்தவும்.",
+      "en": "Please check the details, and press confirm to receive ten rupees."
+    },
+    "paying": {
+      "ta": "பத்து ரூபாய் அனுப்பப்படுகிறது. இயந்திரத்தை விட்டுச் செல்ல வேண்டாம்.",
+      "en": "Sending ten rupees. Please do not leave the machine."
+    },
+    "success": {
+      "ta": "பத்து ரூபாய் வெற்றிகரமாக அனுப்பப்பட்டது. பாட்டிலைத் திருப்பி அளித்ததற்கு நன்றி!",
+      "en": "Ten rupees sent successfully. Thank you for returning the bottle!"
+    },
+    "pending": {
+      "ta": "உங்கள் பாட்டில் ஏற்கப்பட்டது. பத்து ரூபாய் விரைவில் உங்கள் கணக்கிற்கு வந்து சேரும். நன்றி!",
+      "en": "Your bottle is accepted. Ten rupees will reach your account shortly. Thank you!"
+    },
+    "cancelled": {
+      "ta": "ரத்து செய்யப்பட்டது. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Cancelled. Please take back your bottle."
+    },
+    "out_of_service": {
+      "ta": "மன்னிக்கவும், இந்த இயந்திரம் தற்காலிகமாக இயங்கவில்லை. பின்னர் முயற்சிக்கவும்.",
+      "en": "Sorry, this machine is temporarily unavailable. Please try again later."
+    },
+    "hurry": {
+      "ta": "நேரம் முடியப் போகிறது. விரைவாக முடிக்கவும்.",
+      "en": "Time is almost up. Please finish soon."
+    },
+    "reject_BOTTLE_DAMAGED": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. பாட்டில் சேதமடைந்துள்ளது. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Bottle not accepted. The bottle is damaged. Please take back your bottle."
+    },
+    "reject_BOTTLE_FOREIGN": {
+      "ta": "இது ஏற்கப்படும் பாட்டில் அல்ல. தயவுசெய்து அதை எடுத்துக்கொள்ளவும்.",
+      "en": "This item is not an accepted bottle. Please take it back."
+    },
+    "reject_REFUND_QR_NOT_FOUND": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. பாட்டிலில் ரீஃபண்ட் QR ஸ்டிக்கர் இல்லை. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Bottle not accepted. The refund QR sticker was not found. Please take back your bottle."
+    },
+    "reject_REFUND_QR_INVALID": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. ரீஃபண்ட் QR செல்லாது. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Bottle not accepted. The refund QR is not valid. Please take back your bottle."
+    },
+    "reject_REFUND_QR_ALREADY_USED": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. இந்த பாட்டிலுக்கான பணம் ஏற்கனவே வழங்கப்பட்டுவிட்டது. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Bottle not accepted. The refund for this bottle has already been paid. Please take back your bottle."
+    },
+    "reject_IN_USE": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. இந்த பாட்டில் வேறொரு இயந்திரத்தில் பயன்பாட்டில் உள்ளது.",
+      "en": "Bottle not accepted. This bottle is being used at another machine."
+    },
+    "reject_MFG_QR_NOT_FOUND": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. உற்பத்தியாளர் QR இல்லை. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Bottle not accepted. The manufacturer QR was not found. Please take back your bottle."
+    },
+    "reject_MFG_QR_INVALID": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. உற்பத்தியாளர் QR செல்லாது. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Bottle not accepted. The manufacturer QR is not valid. Please take back your bottle."
+    },
+    "reject_BRAND_NOT_ELIGIBLE": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. இந்த பிராண்டுக்கு ரீஃபண்ட் இல்லை. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Bottle not accepted. This brand is not eligible for a refund. Please take back your bottle."
+    },
+    "reject_BOTTLE_ALREADY_RETURNED": {
+      "ta": "பாட்டில் ஏற்கப்படவில்லை. இந்த பாட்டில் ஏற்கனவே திருப்பி அளிக்கப்பட்டது.",
+      "en": "Bottle not accepted. This bottle was already returned."
+    },
+    "reject_INVALID_DESTINATION": {
+      "ta": "சரியான UPI ஐடி அல்லது மொபைல் எண் கிடைக்கவில்லை. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "A valid UPI ID or mobile number was not received. Please take back your bottle."
+    },
+    "reject_CUSTOMER_TIMEOUT": {
+      "ta": "நேரம் முடிந்தது. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "Time ran out. Please take back your bottle."
+    },
+    "reject_PAYOUT_FAILED": {
+      "ta": "பணம் அனுப்ப முடியவில்லை. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொண்டு மீண்டும் முயற்சிக்கவும்.",
+      "en": "The payment could not be sent. Please take your bottle and try again."
+    },
+    "reject_PAYOUT_PENDING": {
+      "ta": "பணம் அனுப்புவதில் தாமதம் ஏற்பட்டது. தயவுசெய்து பின்னர் முயற்சிக்கவும்.",
+      "en": "The payment is delayed. Please try again later."
+    },
+    "reject_BACKEND_UNAVAILABLE": {
+      "ta": "சர்வருடன் இணைப்பு இல்லை. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொண்டு மீண்டும் முயற்சிக்கவும்.",
+      "en": "The server could not be reached. Please take your bottle and try again."
+    },
+    "reject_default": {
+      "ta": "பாட்டிலை ஏற்க முடியவில்லை. தயவுசெய்து உங்கள் பாட்டிலை எடுத்துக்கொள்ளவும்.",
+      "en": "The bottle could not be accepted. Please take back your bottle."
+    }
+  }
+}

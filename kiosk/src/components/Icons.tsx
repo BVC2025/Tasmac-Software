@@ -79,3 +79,13 @@ export const SmsIcon = (p: P) => (
     <path d="M8 9h8M8 13h5" />
   </svg>
 )
+export const SpeakerIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M11 5 6 9H2v6h4l5 4zM15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14" />
+  </svg>
+)
+export const SpeakerOffIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6" />
+  </svg>
+)
