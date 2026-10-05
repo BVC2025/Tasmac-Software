@@ -1,0 +1,34 @@
+# Development: PLC simulator + real central backend + kiosk touchscreen UI.
+# Bottles are inserted from the kiosk "dev" panel (POST /api/sim/insert).
+machine_id: RVM-SIM-001
+
+plc:
+  host: 127.0.0.1
+  port: 5020
+
+simulator:
+  enabled: true
+  auto_insert_every_s: null
+  bottles_file: config/sim_bottles.yaml
+
+backend_driver: http
+backend:
+  url: http://127.0.0.1:8000
+  api_key: dev-sim-key-001          # from: python -m app.cli create-machine RVM-SIM-001 --api-key dev-sim-key-001
+  outbox_path: data/outbox.db
+
+customer_driver: web
+local_api:
+  enabled: true
+  host: 127.0.0.1
+  port: 8765
+  cors_origins: ["http://localhost:5173"]
+
+flow:
+  customer_input_timeout_s: 90
+  payout_poll_interval_s: 1.0
+  payout_pending_wait_s: 10
+  on_payout_pending_timeout: accept
+
+qr:
+  test_signing_secret: tasmac-test-secret-change-me

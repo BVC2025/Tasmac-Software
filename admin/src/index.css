@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+
+/* Wide landscape screens: login image and form side by side */
+@custom-variant side (@media (min-width: 64rem) and (orientation: landscape));
+/* Large portrait screens (machine monitor 1080x1920) */
+@custom-variant tall (@media (min-width: 48rem) and (orientation: portrait));
+
+@theme {
+  --font-sans: "Inter", system-ui, sans-serif;
+  --color-brand-50: #ecf8f1;
+  --color-brand-100: #d1efdd;
+  --color-brand-600: #146c43;
+  --color-brand-700: #0f5132;
+  --color-brand-900: #072b1b;
+}
+
+body {
+  margin: 0;
+  background: #f5f7f6;
+  color: #0f172a;
+}

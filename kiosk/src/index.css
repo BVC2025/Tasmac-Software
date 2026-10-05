@@ -1,0 +1,131 @@
+@import "tailwindcss";
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/800.css";
+@import "@fontsource/noto-sans-tamil/400.css";
+@import "@fontsource/noto-sans-tamil/600.css";
+@import "@fontsource/noto-sans-tamil/800.css";
+
+/* Large portrait screens (machine monitor 1080x1920) */
+@custom-variant tall (@media (min-width: 48rem) and (orientation: portrait));
+
+@theme {
+  --font-sans: "Inter", "Noto Sans Tamil", system-ui, sans-serif;
+  --color-brand-50: #ecf8f1;
+  --color-brand-100: #d1efdd;
+  --color-brand-500: #198754;
+  --color-brand-600: #146c43;
+  --color-brand-700: #0f5132;
+  --color-brand-900: #072b1b;
+  --color-accent: #f5a524;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+/* Touch kiosk: no keyboard focus rings on tap */
+button {
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  margin: 0;
+  background: #f4f7f5;
+  color: #0b1f16;
+  -webkit-user-select: none;
+  user-select: none;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+/* Tamil text runs taller; give it room */
+:lang(ta) {
+  line-height: 1.45;
+}
+
+@keyframes drop {
+  0% { transform: translateY(-14px); opacity: 0; }
+  30% { opacity: 1; }
+  70% { transform: translateY(14px); opacity: 1; }
+  100% { transform: translateY(22px); opacity: 0; }
+}
+.animate-drop { animation: drop 1.8s ease-in-out infinite; }
+
+@keyframes pulse-ring {
+  0% { transform: scale(0.9); opacity: 0.7; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+.animate-pulse-ring { animation: pulse-ring 1.4s ease-out infinite; }
+
+/* ---------- Insert-bottle animation (components/InsertAnimation.tsx), 8 s loop ---------- */
+.ia-bottle,
+.ia-arrow,
+.ia-sweep,
+.ia-brackets {
+  transform-box: fill-box;
+}
+.ia-bottle {
+  transform-origin: 50% 100%;
+  animation: ia-bottle 8s infinite;
+}
+.ia-arrow {
+  transform-origin: 50% 50%;
+  animation: ia-arrow 8s infinite;
+}
+.ia-brackets {
+  transform-origin: 50% 50%;
+  animation: ia-brackets 8s infinite;
+}
+.ia-sweep {
+  animation: ia-sweep 8s infinite;
+}
+.ia-ring-glow {
+  animation: ia-ring-glow 8s infinite;
+}
+
+@keyframes ia-bottle {
+  0% { transform: translateY(-340px); opacity: 0; animation-timing-function: cubic-bezier(0.3, 0, 0.6, 1); }
+  4% { opacity: 1; }
+  16% { transform: translateY(0); animation-timing-function: ease-out; }
+  19% { transform: translateY(-8px); }
+  22% { transform: translateY(0); }
+  55% { transform: translateY(0) scale(1); opacity: 1; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.6); }
+  73% { transform: translateY(-14px) scale(0.22); opacity: 0; }
+  100% { transform: translateY(-14px) scale(0.22); opacity: 0; }
+}
+@keyframes ia-arrow {
+  0%, 22% { opacity: 0; transform: translateY(-6px); }
+  26% { opacity: 1; transform: translateY(0); }
+  32% { transform: translateY(7px); }
+  38% { transform: translateY(0); }
+  44% { transform: translateY(7px); }
+  50% { opacity: 1; transform: translateY(0); }
+  55%, 100% { opacity: 0; }
+}
+@keyframes ia-brackets {
+  0%, 18% { opacity: 0; transform: scale(1.08); }
+  24% { opacity: 0.9; transform: scale(1); }
+  52% { opacity: 0.9; }
+  58%, 100% { opacity: 0; }
+}
+@keyframes ia-sweep {
+  0%, 24% { opacity: 0; transform: translateY(0); }
+  27% { opacity: 0.85; }
+  48% { opacity: 0.85; transform: translateY(270px); }
+  50%, 100% { opacity: 0; transform: translateY(270px); }
+}
+@keyframes ia-ring-glow {
+  0%, 52% { opacity: 0; }
+  58% { opacity: 1; }
+  70% { opacity: 0.9; }
+  84%, 100% { opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ia-bottle, .ia-arrow, .ia-brackets, .ia-sweep, .ia-ring-glow { animation: none; }
+  .ia-sweep, .ia-ring-glow { opacity: 0; }
+}

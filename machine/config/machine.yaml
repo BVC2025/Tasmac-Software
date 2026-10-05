@@ -1,0 +1,29 @@
+# Real machine: connect to the PLC over Modbus TCP.
+# Camera / backend / customer UI are still mocks until those phases are built.
+machine_id: RVM-CHN-0001
+
+plc:
+  host: 192.168.1.10        # PLC IP - get from the manufacturer
+  port: 502
+  device_id: 1              # Modbus unit id
+  write_base: 0             # PC -> PLC block (see docs/plc-interface-spec.md)
+  read_base: 100            # PLC -> PC block
+  poll_interval_s: 0.1
+  heartbeat_interval_s: 0.5
+  plc_heartbeat_timeout_s: 3.0
+  default_cmd_timeout_s: 10
+  cmd_timeouts_s:
+    ACCEPT_BOTTLE: 15
+    REJECT_BOTTLE: 15
+
+simulator:
+  enabled: false
+
+flow:
+  inspection_angles: 4
+  qr_scan_max_rotations: 8
+  customer_input_timeout_s: 60
+  max_destination_attempts: 3
+  payout_poll_interval_s: 2
+  payout_pending_wait_s: 30
+  on_payout_pending_timeout: accept

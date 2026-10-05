@@ -1,0 +1,23 @@
+# Full simulation: built-in PLC simulator + mock camera/backend/customer.
+machine_id: RVM-SIM-001
+
+plc:
+  host: 127.0.0.1
+  port: 5020
+  device_id: 1
+  write_base: 0
+  read_base: 100
+
+simulator:
+  enabled: true
+  time_scale: 1.0
+  auto_insert_every_s: 4
+  bottles_file: config/sim_bottles.yaml   # generate with: python tools/generate_test_qr.py
+
+flow:
+  payout_poll_interval_s: 1.0
+  payout_pending_wait_s: 5
+  on_payout_pending_timeout: accept
+
+qr:
+  test_signing_secret: tasmac-test-secret-change-me
