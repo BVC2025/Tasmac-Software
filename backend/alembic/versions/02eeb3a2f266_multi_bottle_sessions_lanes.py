@@ -40,8 +40,9 @@ def upgrade() -> None:
     )
     op.create_index(op.f('ix_session_bottles_created_at'), 'session_bottles', ['created_at'], unique=False)
     op.create_index(op.f('ix_session_bottles_session_id'), 'session_bottles', ['session_id'], unique=False)
-    op.add_column('refund_claims', sa.Column('lane', sa.Integer(), nullable=False))
-    op.add_column('transactions', sa.Column('bottle_count', sa.Integer(), nullable=False))
+    # existing rows are single-bottle sessions: lane 1, one bottle
+    op.add_column('refund_claims', sa.Column('lane', sa.Integer(), nullable=False, server_default='1'))
+    op.add_column('transactions', sa.Column('bottle_count', sa.Integer(), nullable=False, server_default='1'))
     # ### end Alembic commands ###
 
 
