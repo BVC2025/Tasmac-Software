@@ -33,6 +33,8 @@ class SimBottleFeed:
             raise ValueError("Bottle feed is empty")
         self.bottles = bottles
         self._index = -1
+        self._in_lane: dict[int, SimBottle] = {}   # bottle currently inside each lane
+        self._last: SimBottle | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "SimBottleFeed":
@@ -72,9 +74,17 @@ class SimBottleFeed:
         for b in self.bottles:
             b.refund_qr, b.mfg_qr = fresh(b.refund_qr), fresh(b.mfg_qr)
 
-    def advance(self) -> None:
+    def advance(self, lane: int = 1) -> None:
+        """A bottle was inserted into `lane`: it becomes the next bottle of the feed."""
         self._index = (self._index + 1) % len(self.bottles)
+        self._last = self.bottles[self._index]
+        self._in_lane[lane] = self._last
+
+    def at(self, lane: int) -> SimBottle:
+        """The bottle currently in a lane."""
+        return self._in_lane.get(lane) or self.current
 
     @property
     def current(self) -> SimBottle:
-        return self.bottles[max(self._index, 0)]
+        """The most recently inserted bottle."""
+        return self._last or self.bottles[max(self._index, 0)]

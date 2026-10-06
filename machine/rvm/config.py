@@ -11,6 +11,7 @@ class PLCConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 502
     device_id: int = 1
+    lanes: int = Field(default=3, ge=1, le=3)   # bottle inlets on this machine
     write_base: int = 0
     read_base: int = 100
     poll_interval_s: float = 0.1
@@ -30,6 +31,7 @@ class SimulatorConfig(BaseModel):
 
 
 class FlowConfig(BaseModel):
+    batch_window_s: float = 3.0        # after the first bottle, wait this long for bottles in other inlets
     inspection_angles: int = 4         # Images per bottle (rotating between)
     qr_scan_max_rotations: int = 8
     close_inlet_retries: int = 3

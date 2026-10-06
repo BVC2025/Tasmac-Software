@@ -18,8 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .. import services as svc
 from ..db import get_db
 from ..models import (
-    AdminUser, Alert, AuditLog, EligibleBrand, Machine, RefundClaim, Role, RvmSession, SmsMessage, Transaction,
-    TxnStatus, utcnow,
+    AdminUser, Alert, AuditLog, BottleState, EligibleBrand, Machine, RefundClaim, Role, RvmSession, SessionBottle,
+    SmsMessage, Transaction, TxnStatus, utcnow,
 )
 from ..schemas import MachineOut, StatsOut, TxnAdminOut
 from ..security import current_admin, hash_api_key, new_api_key, require_role
@@ -57,10 +57,11 @@ async def stats(db: AsyncSession = Depends(get_db)):
                                     .where(Machine.active.is_(True), Machine.last_seen_at > now - ONLINE_WINDOW)),
         sessions_today=await count(select(func.count()).select_from(RvmSession)
                                    .where(RvmSession.started_at >= today)),
-        bottles_accepted_today=await count(select(func.count()).select_from(RvmSession).where(
-            RvmSession.started_at >= today, RvmSession.outcome == "ACCEPTED")),
-        bottles_returned_today=await count(select(func.count()).select_from(RvmSession).where(
-            RvmSession.started_at >= today, RvmSession.outcome == "RETURNED")),
+        bottles_accepted_today=await count(select(func.count()).select_from(SessionBottle).where(
+            SessionBottle.created_at >= today, SessionBottle.status == BottleState.ACCEPTED)),
+        bottles_returned_today=await count(select(func.count()).select_from(SessionBottle).where(
+            SessionBottle.created_at >= today,
+            SessionBottle.status.in_([BottleState.REJECTED, BottleState.RETURNED]))),
         refunds_success_today=await count(select(func.count()).select_from(Transaction).where(
             Transaction.created_at >= today, Transaction.status == TxnStatus.SUCCESS)),
         refunds_pending=await count(select(func.count()).select_from(Transaction)
@@ -255,12 +256,16 @@ def _report_range(from_: date | None, to: date | None) -> tuple[date, date, date
 
 async def _daily_rows(db: AsyncSession, start: datetime, end: datetime, machine_id: str | None) -> list[dict]:
     s_day = func.date(func.timezone("Asia/Kolkata", RvmSession.started_at))
-    sq = (select(s_day.label("day"), RvmSession.machine_id,
-                 func.count().label("sessions"),
-                 func.sum(case((RvmSession.outcome == "ACCEPTED", 1), else_=0)).label("accepted"),
-                 func.sum(case((RvmSession.outcome == "RETURNED", 1), else_=0)).label("returned"))
+    sq = (select(s_day.label("day"), RvmSession.machine_id, func.count().label("sessions"))
           .where(RvmSession.started_at >= start, RvmSession.started_at < end)
           .group_by(s_day, RvmSession.machine_id))
+    b_day = func.date(func.timezone("Asia/Kolkata", SessionBottle.created_at))
+    bq = (select(b_day.label("day"), SessionBottle.machine_id,
+                 func.sum(case((SessionBottle.status == BottleState.ACCEPTED, 1), else_=0)).label("accepted"),
+                 func.sum(case((SessionBottle.status.in_([BottleState.REJECTED, BottleState.RETURNED]), 1),
+                               else_=0)).label("returned"))
+          .where(SessionBottle.created_at >= start, SessionBottle.created_at < end)
+          .group_by(b_day, SessionBottle.machine_id))
     t_day = func.date(func.timezone("Asia/Kolkata", Transaction.created_at))
     tq = (select(t_day.label("day"), Transaction.machine_id,
                  func.sum(case((Transaction.status == TxnStatus.SUCCESS, 1), else_=0)).label("paid"),
@@ -271,13 +276,17 @@ async def _daily_rows(db: AsyncSession, start: datetime, end: datetime, machine_
           .group_by(t_day, Transaction.machine_id))
     if machine_id:
         sq = sq.where(RvmSession.machine_id == machine_id)
+        bq = bq.where(SessionBottle.machine_id == machine_id)
         tq = tq.where(Transaction.machine_id == machine_id)
 
     rows: dict[tuple, dict] = {}
     blank = {"sessions": 0, "accepted": 0, "returned": 0, "paid": 0, "amount_paise": 0, "failed": 0, "pending": 0}
     for r in (await db.execute(sq)).all():
         d = rows.setdefault((r.day, r.machine_id), {"day": r.day.isoformat(), "machine_id": r.machine_id, **blank})
-        d.update(sessions=r.sessions, accepted=int(r.accepted), returned=int(r.returned))
+        d.update(sessions=r.sessions)
+    for r in (await db.execute(bq)).all():
+        d = rows.setdefault((r.day, r.machine_id), {"day": r.day.isoformat(), "machine_id": r.machine_id, **blank})
+        d.update(accepted=int(r.accepted), returned=int(r.returned))
     for r in (await db.execute(tq)).all():
         d = rows.setdefault((r.day, r.machine_id), {"day": r.day.isoformat(), "machine_id": r.machine_id, **blank})
         d.update(paid=int(r.paid), amount_paise=int(r.amount), failed=int(r.failed), pending=int(r.pending))
@@ -334,9 +343,17 @@ async def sessions(machine_id: str | None = None, outcome: str | None = None,
     if outcome:
         q = q.where(RvmSession.outcome == outcome)
     rows = (await db.execute(q)).scalars().all()
+    bottles: dict[str, list] = {}
+    if rows:
+        res = await db.execute(select(SessionBottle).where(SessionBottle.session_id.in_([r.id for r in rows]))
+                               .order_by(SessionBottle.lane))
+        for b in res.scalars():
+            bottles.setdefault(b.session_id, []).append(
+                {"lane": b.lane, "status": b.status, "reason": b.reason, "brand": b.brand,
+                 "refund_serial": b.refund_serial, "mfg_serial": b.mfg_serial})
     return [{"id": r.id, "machine_id": r.machine_id, "refund_serial": r.refund_serial, "mfg_serial": r.mfg_serial,
              "brand": r.brand, "outcome": r.outcome, "reason": r.reason, "started_at": r.started_at,
-             "ended_at": r.ended_at} for r in rows]
+             "ended_at": r.ended_at, "bottles": bottles.get(r.id, [])} for r in rows]
 
 
 @router.get("/sms")

@@ -14,18 +14,29 @@ class MachineState(str, Enum):
     STARTING = "STARTING"
     HEALTH_CHECK = "HEALTH_CHECK"
     READY = "READY"
-    BOTTLE_DETECTED = "BOTTLE_DETECTED"
-    POSITIONING = "POSITIONING"
-    INSPECTING = "INSPECTING"
-    SCANNING_REFUND_QR = "SCANNING_REFUND_QR"
-    SCANNING_MFG_QR = "SCANNING_MFG_QR"
-    VERIFYING = "VERIFYING"
+    COLLECTING = "COLLECTING"   # first bottle in; short window for bottles in the other inlets
+    CHECKING = "CHECKING"       # every lane checks its bottle in parallel (see LaneStep)
     SELECT_REFUND_METHOD = "SELECT_REFUND_METHOD"
     CONFIRMING = "CONFIRMING"
     PAYING = "PAYING"
     ACCEPTING = "ACCEPTING"
     REJECTING = "REJECTING"
     OUT_OF_SERVICE = "OUT_OF_SERVICE"
+
+
+class LaneStep(str, Enum):
+    """Progress of one bottle in one lane (published as "lane" events)."""
+
+    DETECTED = "DETECTED"
+    POSITIONING = "POSITIONING"
+    INSPECTING = "INSPECTING"
+    SCANNING_REFUND_QR = "SCANNING_REFUND_QR"
+    SCANNING_MFG_QR = "SCANNING_MFG_QR"
+    VERIFYING = "VERIFYING"
+    VALID = "VALID"           # eligible, parked in the lane's holding chamber
+    REJECTED = "REJECTED"     # handed back at the lane's inlet
+    ACCEPTED = "ACCEPTED"     # in the bin after a successful payout
+    RETURNED = "RETURNED"     # was valid, handed back (payout failed / cancelled)
 
 
 @dataclass

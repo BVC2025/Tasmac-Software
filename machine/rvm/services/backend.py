@@ -65,6 +65,8 @@ class PayoutStatus(str, Enum):
 
 
 class Backend(ABC):
+    """One session = one customer = up to 3 bottles (one per lane), paid together."""
+
     @abstractmethod
     async def health(self) -> bool: ...
 
@@ -73,14 +75,18 @@ class Backend(ABC):
         """Report machine status to the server (no-op for mocks)."""
 
     @abstractmethod
-    async def verify_refund_qr(self, session_id: str, raw: str) -> Verdict: ...
+    async def verify_refund_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict: ...
 
     @abstractmethod
-    async def verify_mfg_qr(self, session_id: str, raw: str) -> Verdict: ...
+    async def verify_mfg_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict: ...
 
     @abstractmethod
-    async def check_eligibility(self, session_id: str, refund_raw: str, mfg_raw: str) -> Verdict:
-        """Final eligibility check. On success the refund QR is reserved for this session."""
+    async def check_eligibility(self, session_id: str, refund_raw: str, mfg_raw: str, lane: int = 1) -> Verdict:
+        """Final eligibility check. On success the refund QR is reserved for this session + lane."""
+
+    @abstractmethod
+    async def bottle_rejected(self, session_id: str, lane: int, reason: str) -> None:
+        """A bottle of the batch was rejected and handed back (releases its reservation, if any)."""
 
     @abstractmethod
     async def validate_destination(self, session_id: str, dest: Destination) -> Verdict:
@@ -89,7 +95,7 @@ class Backend(ABC):
     @abstractmethod
     async def create_transaction(self, session_id: str, dest: Destination, amount_paise: int,
                                  sms_mobile: str | None = None) -> str:
-        """Idempotent per session_id. Returns transaction id."""
+        """One payout for all reserved bottles of the session. Idempotent per session_id."""
 
     @abstractmethod
     async def request_payout(self, txn_id: str) -> PayoutStatus: ...
@@ -99,11 +105,11 @@ class Backend(ABC):
 
     @abstractmethod
     async def bottle_accepted(self, session_id: str, txn_id: str | None) -> None:
-        """Bottle is physically in the bin: consume the QRs, send SMS."""
+        """All held bottles of the session are in the bin: consume their QRs, send SMS."""
 
     @abstractmethod
     async def bottle_returned(self, session_id: str, reason: str) -> None:
-        """Bottle went back to the customer: release any reservation."""
+        """All held bottles went back to the customer: release their reservations."""
 
 
 class MockBackend(Backend):
@@ -114,15 +120,19 @@ class MockBackend(Backend):
         self.feed = feed
         self.consumed_refund: set[str] = set()
         self.consumed_mfg: set[str] = set()
-        self.reservations: dict[str, tuple[str, str]] = {}   # session -> (refund serial, mfg serial)
+        self.reservations: dict[tuple[str, int], tuple[str, str]] = {}   # (session, lane) -> (refund, mfg)
+        self.rejected: list[tuple[str, int, str]] = []
         self.transactions: dict[str, dict] = {}
         self._txn_by_session: dict[str, str] = {}
         self.sms_log: list[str] = []
 
+    def _session_reservations(self, session_id: str) -> dict[int, tuple[str, str]]:
+        return {lane: v for (s, lane), v in self.reservations.items() if s == session_id}
+
     async def health(self) -> bool:
         return True
 
-    async def verify_refund_qr(self, session_id: str, raw: str) -> Verdict:
+    async def verify_refund_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict:
         try:
             qr = qr_codec.parse_refund(raw)
         except qr_codec.QRFormatError:
@@ -131,11 +141,11 @@ class MockBackend(Backend):
             return Verdict(False, "REFUND_QR_FORGED")
         if qr.serial in self.consumed_refund:
             return Verdict(False, "REFUND_QR_ALREADY_USED")
-        if any(r == qr.serial for s, (r, _) in self.reservations.items() if s != session_id):
+        if any(r == qr.serial for key, (r, _) in self.reservations.items() if key != (session_id, lane)):
             return Verdict(False, "REFUND_QR_IN_USE")
         return Verdict(True, data={"serial": qr.serial})
 
-    async def verify_mfg_qr(self, session_id: str, raw: str) -> Verdict:
+    async def verify_mfg_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict:
         try:
             qr = qr_codec.parse_mfg(raw)
         except qr_codec.QRFormatError:
@@ -144,7 +154,7 @@ class MockBackend(Backend):
             return Verdict(False, "MFG_QR_FORGED")
         return Verdict(True, data={"brand": qr.brand, "batch": qr.batch, "serial": qr.serial})
 
-    async def check_eligibility(self, session_id: str, refund_raw: str, mfg_raw: str) -> Verdict:
+    async def check_eligibility(self, session_id: str, refund_raw: str, mfg_raw: str, lane: int = 1) -> Verdict:
         r, m = qr_codec.parse_refund(refund_raw), qr_codec.parse_mfg(mfg_raw)
         if m.brand not in self.ELIGIBLE_BRANDS:
             return Verdict(False, "BRAND_NOT_ELIGIBLE")
@@ -152,8 +162,17 @@ class MockBackend(Backend):
             return Verdict(False, "BOTTLE_ALREADY_RETURNED")
         if r.serial in self.consumed_refund:
             return Verdict(False, "REFUND_QR_ALREADY_USED")
-        self.reservations[session_id] = (r.serial, m.serial)
+        others = [v for key, v in self.reservations.items() if key != (session_id, lane)]
+        if any(rr == r.serial for rr, _ in others):
+            return Verdict(False, "REFUND_QR_IN_USE")
+        if any(mm == m.serial for _, mm in others):
+            return Verdict(False, "BOTTLE_IN_USE")
+        self.reservations[(session_id, lane)] = (r.serial, m.serial)
         return Verdict(True, data={"amount_paise": 1000})
+
+    async def bottle_rejected(self, session_id: str, lane: int, reason: str) -> None:
+        self.reservations.pop((session_id, lane), None)
+        self.rejected.append((session_id, lane, reason))
 
     async def validate_destination(self, session_id: str, dest: Destination) -> Verdict:
         if dest.value.startswith("invalid"):
@@ -164,12 +183,13 @@ class MockBackend(Backend):
                                  sms_mobile: str | None = None) -> str:
         if session_id in self._txn_by_session:
             return self._txn_by_session[session_id]
-        if session_id not in self.reservations:
+        held = self._session_reservations(session_id)
+        if not held:
             raise RuntimeError("No eligibility reservation for session")
         txn_id = f"TXN-{uuid.uuid4().hex[:12].upper()}"
         planned = self.feed.current.payout if self.feed else "success"
         self.transactions[txn_id] = {
-            "session_id": session_id, "dest": dest, "amount_paise": amount_paise,
+            "session_id": session_id, "dest": dest, "amount_paise": 1000 * len(held), "bottles": len(held),
             "status": PayoutStatus.PENDING, "planned": planned, "polls": 0,
         }
         self._txn_by_session[session_id] = txn_id
@@ -190,15 +210,18 @@ class MockBackend(Backend):
         return t["status"]
 
     async def bottle_accepted(self, session_id: str, txn_id: str | None) -> None:
-        refund_serial, mfg_serial = self.reservations.pop(session_id)
-        self.consumed_refund.add(refund_serial)
-        self.consumed_mfg.add(mfg_serial)
+        for lane, (refund_serial, mfg_serial) in self._session_reservations(session_id).items():
+            self.reservations.pop((session_id, lane))
+            self.consumed_refund.add(refund_serial)
+            self.consumed_mfg.add(mfg_serial)
         if txn_id:
             t = self.transactions[txn_id]
             if t["status"] == PayoutStatus.SUCCESS:
-                msg = f"Rs.10 refund credited to {t['dest'].masked()} for bottle return. Ref {txn_id}"
+                msg = (f"Rs.{t['amount_paise'] // 100} refund credited to {t['dest'].masked()} "
+                       f"for {t['bottles']} bottle(s). Ref {txn_id}")
                 self.sms_log.append(msg)
                 log.info("[MOCK SMS] %s", msg)
 
     async def bottle_returned(self, session_id: str, reason: str) -> None:
-        self.reservations.pop(session_id, None)
+        for lane in list(self._session_reservations(session_id)):
+            self.reservations.pop((session_id, lane))

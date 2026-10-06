@@ -9,7 +9,8 @@ from .. import services as svc
 from ..db import get_db
 from ..models import Machine
 from ..schemas import (
-    AcceptedIn, DestinationIn, EligibilityIn, HeartbeatIn, QRIn, ReturnedIn, TransactionIn, TxnOut, VerdictOut,
+    AcceptedIn, BottleRejectedIn, DestinationIn, EligibilityIn, HeartbeatIn, QRIn, ReturnedIn, TransactionIn, TxnOut,
+    VerdictOut,
 )
 from ..security import current_machine
 
@@ -24,19 +25,25 @@ async def heartbeat(body: HeartbeatIn, m: Machine = Depends(current_machine), db
 @router.post("/sessions/{session_id}/refund-qr", response_model=VerdictOut)
 async def refund_qr(session_id: str, body: QRIn, m: Machine = Depends(current_machine),
                     db: AsyncSession = Depends(get_db)):
-    return asdict(await svc.verify_refund_qr(db, m, session_id, body.raw))
+    return asdict(await svc.verify_refund_qr(db, m, session_id, body.raw, body.lane))
 
 
 @router.post("/sessions/{session_id}/mfg-qr", response_model=VerdictOut)
 async def mfg_qr(session_id: str, body: QRIn, m: Machine = Depends(current_machine),
                  db: AsyncSession = Depends(get_db)):
-    return asdict(await svc.verify_mfg_qr(db, m, session_id, body.raw))
+    return asdict(await svc.verify_mfg_qr(db, m, session_id, body.raw, body.lane))
 
 
 @router.post("/sessions/{session_id}/eligibility", response_model=VerdictOut)
 async def eligibility(session_id: str, body: EligibilityIn, m: Machine = Depends(current_machine),
                       db: AsyncSession = Depends(get_db)):
-    return asdict(await svc.check_eligibility(db, m, session_id, body.refund_raw, body.mfg_raw))
+    return asdict(await svc.check_eligibility(db, m, session_id, body.refund_raw, body.mfg_raw, body.lane))
+
+
+@router.post("/sessions/{session_id}/bottles/{lane}/rejected", status_code=204)
+async def bottle_rejected(session_id: str, lane: int, body: BottleRejectedIn, m: Machine = Depends(current_machine),
+                          db: AsyncSession = Depends(get_db)):
+    await svc.bottle_rejected(db, m, session_id, lane, body.reason)
 
 
 @router.post("/sessions/{session_id}/destination", response_model=VerdictOut)

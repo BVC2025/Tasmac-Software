@@ -3,7 +3,7 @@
 import asyncio
 
 from rvm.core.events import MachineState
-from rvm.plc.registers import Sensor
+from rvm.plc.registers import LaneSensor
 from rvm.services import qr_codec
 
 from .conftest import SECRET, bottle
@@ -42,7 +42,7 @@ async def test_qr_found_after_extra_rotation(make_rig):
     async with make_rig([bottle(refund_angle=6, mfg_angle=1)]) as rig:
         rig.orch.qr_reader.angles_per_turn = 8
         s = await rig.insert_and_wait()
-        assert len(s.frames) == 7
+        assert len(s.bottles[1].frames) == 7
         assert s.outcome == "ACCEPTED"
 
 
@@ -109,7 +109,15 @@ async def test_estop_mid_session_goes_out_of_service_then_recovers(make_rig):
         await rig.wait_state(MachineState.READY)
         await asyncio.sleep(0.1)
         rig.sim.insert_bottle()
-        await rig.wait_state(MachineState.INSPECTING)
+        await rig.wait_state(MachineState.CHECKING)
+
+        async def inspecting():
+            while True:
+                b = rig.orch._last_session.bottles.get(1)
+                if b and b.step.value == "INSPECTING":
+                    return
+                await asyncio.sleep(0.01)
+        await asyncio.wait_for(inspecting(), 5)
         rig.sim.set_estop(True)
         await rig.wait_state(MachineState.OUT_OF_SERVICE)
         assert rig.orch.sessions[-1].outcome == "ABORTED"
@@ -118,7 +126,7 @@ async def test_estop_mid_session_goes_out_of_service_then_recovers(make_rig):
         await rig.wait_state(MachineState.READY, timeout=8)
         # unpaid leftover bottle went back to the customer
         assert rig.sim.bin_count == 0
-        assert not rig.sim.sensors & (Sensor.BOTTLE_IN_SCAN_POSITION | Sensor.BOTTLE_IN_HOLD)
+        assert not rig.sim.lane_sensors[1] & (LaneSensor.BOTTLE_IN_SCAN_POSITION | LaneSensor.BOTTLE_IN_HOLD)
 
         s = await rig.insert_and_wait()
         assert s.outcome == "ACCEPTED"
@@ -161,7 +169,7 @@ async def test_backend_outage_takes_machine_out_of_service(make_rig):
         healthy = False
         await rig.wait_state(MachineState.OUT_OF_SERVICE, timeout=5)
         assert rig.orch.fault_reason == "BACKEND_UNREACHABLE"
-        assert rig.sim.sensors & Sensor.INLET_DOOR_CLOSED  # no bottles accepted while down
+        assert all(ls & LaneSensor.INLET_DOOR_CLOSED for ls in rig.sim.lane_sensors.values())  # no bottles while down
         healthy = True
         await rig.wait_state(MachineState.READY, timeout=5)
         assert rig.orch.fault_reason is None
@@ -175,3 +183,80 @@ async def test_sessions_written_to_local_log(make_rig):
         rows = rig.orch.session_log.recent()
         assert [r["outcome"] for r in rows] == ["RETURNED", "ACCEPTED"]
         assert rows[1]["destination"] == "ra***@okaxis" and rows[1]["txn_id"]
+
+
+
+# ---------------- multi-lane batches ----------------
+
+async def test_three_bottles_at_once_one_damaged(make_rig):
+    async with make_rig([bottle("a"), bottle("b", condition="damaged"), bottle("c")]) as rig:
+        s = await rig.insert_and_wait(3)
+        steps = {ln: b.step.value for ln, b in s.bottles.items()}
+        assert steps == {1: "ACCEPTED", 2: "REJECTED", 3: "ACCEPTED"}
+        assert s.bottles[2].reason == "BOTTLE_DAMAGED"
+        assert s.outcome == "ACCEPTED" and rig.sim.bin_count == 2
+        txn = rig.backend.transactions[s.txn_id]
+        assert txn["amount_paise"] == 2000 and txn["bottles"] == 2
+        assert [(lane, reason) for _, lane, reason in rig.backend.rejected] == [(2, "BOTTLE_DAMAGED")]
+        assert "Rs.20" in rig.backend.sms_log[0]
+
+
+async def test_bottles_one_by_one_within_window_share_a_batch(make_rig):
+    async with make_rig([bottle(), bottle()]) as rig:
+        s = await rig.insert_and_wait([1, 2], gap_s=0.1)
+        assert sorted(s.bottles) == [1, 2]
+        assert rig.backend.transactions[s.txn_id]["amount_paise"] == 2000
+
+
+async def test_destination_asked_only_after_all_bottles_checked(make_rig):
+    async with make_rig([bottle(), bottle(refund_angle=6), bottle()]) as rig:
+        rig.orch.qr_reader.angles_per_turn = 8   # lane 2 needs extra rotations -> finishes last
+        q = rig.bus.subscribe()
+        await rig.insert_and_wait(3)
+        events = []
+        while not q.empty():
+            events.append(q.get_nowait())
+        ask = next(i for i, e in enumerate(events) if e.type == "state" and e.data["state"] == "SELECT_REFUND_METHOD")
+        valid_at = [i for i, e in enumerate(events) if e.type == "lane" and e.data["step"] == "VALID"]
+        assert len(valid_at) == 3 and max(valid_at) < ask
+        ask_event = events[ask].data
+        assert ask_event["amount_paise"] == 3000 and ask_event["bottle_count"] == 3
+
+
+async def test_payout_failed_hands_back_every_valid_bottle(make_rig):
+    async with make_rig([bottle(payout="failed"), bottle(payout="failed")]) as rig:
+        s = await rig.insert_and_wait(2)
+        assert {b.step.value for b in s.bottles.values()} == {"RETURNED"}
+        assert s.reason == "PAYOUT_FAILED" and rig.sim.bin_count == 0
+        assert rig.backend.reservations == {}
+
+
+async def test_all_bottles_invalid_no_refund_step(make_rig):
+    async with make_rig([bottle(condition="damaged"), bottle(refund_qr=None)]) as rig:
+        q = rig.bus.subscribe()
+        s = await rig.insert_and_wait(2)
+        assert s.outcome == "RETURNED" and s.txn_id is None
+        states = []
+        while not q.empty():
+            e = q.get_nowait()
+            if e.type == "state":
+                states.append(e.data["state"])
+        assert "SELECT_REFUND_METHOD" not in states
+
+
+async def test_same_refund_qr_in_two_lanes_pays_once(make_rig):
+    first = bottle()
+    copy = bottle(refund_qr=first.refund_qr)
+    async with make_rig([first, copy]) as rig:
+        s = await rig.insert_and_wait(2)
+        steps = sorted(b.step.value for b in s.bottles.values())
+        assert steps == ["ACCEPTED", "REJECTED"]
+        rejected = next(b for b in s.bottles.values() if b.step.value == "REJECTED")
+        assert rejected.reason == "REFUND_QR_IN_USE"
+        assert rig.backend.transactions[s.txn_id]["amount_paise"] == 1000
+
+
+async def test_single_lane_machine(make_rig):
+    async with make_rig([bottle()], lanes=1) as rig:
+        s = await rig.insert_and_wait(1)
+        assert s.outcome == "ACCEPTED" and list(s.bottles) == [1]

@@ -95,15 +95,21 @@ class HttpBackend(Backend):
             "state": state, "bin_fill_pct": bin_fill_pct, "software_version": software_version,
             "fault_reason": (fault_reason or "")[:128] or None})
 
-    async def verify_refund_qr(self, session_id: str, raw: str) -> Verdict:
-        return self._verdict(await self._request("POST", f"/sessions/{session_id}/refund-qr", {"raw": raw}))
-
-    async def verify_mfg_qr(self, session_id: str, raw: str) -> Verdict:
-        return self._verdict(await self._request("POST", f"/sessions/{session_id}/mfg-qr", {"raw": raw}))
-
-    async def check_eligibility(self, session_id: str, refund_raw: str, mfg_raw: str) -> Verdict:
+    async def verify_refund_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict:
         return self._verdict(await self._request(
-            "POST", f"/sessions/{session_id}/eligibility", {"refund_raw": refund_raw, "mfg_raw": mfg_raw}))
+            "POST", f"/sessions/{session_id}/refund-qr", {"raw": raw, "lane": lane}))
+
+    async def verify_mfg_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict:
+        return self._verdict(await self._request(
+            "POST", f"/sessions/{session_id}/mfg-qr", {"raw": raw, "lane": lane}))
+
+    async def check_eligibility(self, session_id: str, refund_raw: str, mfg_raw: str, lane: int = 1) -> Verdict:
+        return self._verdict(await self._request(
+            "POST", f"/sessions/{session_id}/eligibility",
+            {"refund_raw": refund_raw, "mfg_raw": mfg_raw, "lane": lane}))
+
+    async def bottle_rejected(self, session_id: str, lane: int, reason: str) -> None:
+        await self._notify(f"/sessions/{session_id}/bottles/{lane}/rejected", {"reason": reason[:64]})
 
     async def validate_destination(self, session_id: str, dest: Destination) -> Verdict:
         return self._verdict(await self._request(

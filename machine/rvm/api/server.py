@@ -13,7 +13,6 @@ Simulation only (when the PLC simulator runs in-process):
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from dataclasses import asdict
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -39,6 +38,11 @@ class DestinationIn(BaseModel):
 
 class SimInsertIn(BaseModel):
     bottle: str | None = None   # scenario name; default = next in feed
+    lane: int | None = None     # inlet 1..3; default = first free inlet
+
+
+class SimBatchIn(BaseModel):
+    bottles: list[str | None] = Field(default_factory=list, max_length=3)  # one per lane, None = next in feed
 
 
 class ConfirmIn(BaseModel):
@@ -57,6 +61,7 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
                sim: PLCSimulator | None, feed: SimBottleFeed | None, cors_origins: list[str]) -> FastAPI:
     # Keep the latest state/message so a (re)connecting kiosk can render immediately
     last: dict[str, dict] = {}
+    lanes_now: dict[int, dict] = {}   # latest step of each lane in the current session
 
     async def remember():
         q = bus.subscribe()
@@ -64,6 +69,10 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
             ev = await q.get()
             if ev.type in ("state", "message"):
                 last[ev.type] = _event_json(ev)
+            elif ev.type == "session_started":
+                lanes_now.clear()
+            elif ev.type == "lane":
+                lanes_now[ev.data["lane"]] = _event_json(ev)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -83,6 +92,8 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
             "last_message": last.get("message"),
             "waiting_for": customer.waiting_for if customer else None,
             "machine_id": orch.cfg.machine_id,
+            "lane_count": len(orch.lanes),
+            "lanes": list(lanes_now.values()),
             "simulation": sim is not None,
             "plc": {"connected": s.connected, "state": s.state.name, "fault": s.fault_code.name,
                     "bin_fill_pct": s.bin_fill_pct},
@@ -96,10 +107,14 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
     async def sessions(limit: int = 20):
         out = []
         for s in orch.sessions[-limit:][::-1]:
-            d = asdict(s)
-            d.pop("frames", None)
-            d["destination"] = s.destination.masked() if s.destination else None
-            out.append(d)
+            accepted = [b for b in s.bottles.values() if b.step.value == "ACCEPTED"]
+            out.append({
+                "id": s.id, "started_at": s.started_at, "outcome": s.outcome, "reason": s.reason,
+                "bottles": s.summary(), "accepted": len(accepted),
+                "amount_paise": sum(b.amount_paise for b in accepted),
+                "destination": s.destination.masked() if s.destination else None,
+                "txn_id": s.txn_id, "payout_status": s.payout_status.value if s.payout_status else None,
+            })
         return out
 
     @app.post("/api/customer/destination")
@@ -143,8 +158,27 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
                 feed.select_next(body.bottle)
             except KeyError:
                 raise HTTPException(404, f"Unknown test bottle {body.bottle}")
-        inserted = sim.insert_bottle()
-        return {"inserted": inserted, "bottle": feed.current.name if (inserted and feed) else None}
+        lane = sim.insert_bottle(body.lane if body else None)
+        return {"inserted": lane is not None, "lane": lane,
+                "bottle": feed.at(lane).name if (lane and feed) else None}
+
+    @app.post("/api/sim/insert-batch")
+    async def sim_insert_batch(body: SimBatchIn):
+        """Insert bottles into several inlets at the same moment (one per lane)."""
+        if sim is None:
+            raise HTTPException(404, "Not in simulation mode")
+        names = body.bottles or [None] * len(orch.lanes)
+        placed = []
+        for lane, name in zip(orch.lanes, names):
+            if name and feed:
+                try:
+                    feed.select_next(name)
+                except KeyError:
+                    raise HTTPException(404, f"Unknown test bottle {name}")
+            got = sim.insert_bottle(lane)
+            if got:
+                placed.append({"lane": got, "bottle": feed.at(got).name if feed else None})
+        return {"inserted": placed}
 
     @app.post("/api/sim/estop")
     async def sim_estop(body: EstopIn):

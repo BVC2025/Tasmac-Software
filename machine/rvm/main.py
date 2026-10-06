@@ -93,7 +93,7 @@ async def run(cfg: MachineConfig) -> None:
         sim = PLCSimulator(
             cfg.plc.host, cfg.plc.port, cfg.plc.write_base, cfg.plc.read_base,
             time_scale=sim_cfg.time_scale, auto_insert_every_s=sim_cfg.auto_insert_every_s,
-            on_insert=feed.advance,
+            on_insert=feed.advance, lanes=cfg.plc.lanes,
         )
         await sim.start()
 

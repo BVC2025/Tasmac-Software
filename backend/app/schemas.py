@@ -12,11 +12,17 @@ class VerdictOut(BaseModel):
 
 class QRIn(BaseModel):
     raw: str = Field(max_length=512)
+    lane: int = Field(default=1, ge=1, le=3)
 
 
 class EligibilityIn(BaseModel):
     refund_raw: str = Field(max_length=512)
     mfg_raw: str = Field(max_length=512)
+    lane: int = Field(default=1, ge=1, le=3)
+
+
+class BottleRejectedIn(BaseModel):
+    reason: str = Field(max_length=64)
 
 
 class DestinationIn(BaseModel):
@@ -34,6 +40,7 @@ class TxnOut(BaseModel):
     id: str
     status: str
     amount_paise: int
+    bottle_count: int = 1
 
 
 class AcceptedIn(BaseModel):
@@ -74,6 +81,7 @@ class TxnAdminOut(BaseModel):
     session_id: str
     machine_id: str
     refund_serial: str
+    bottle_count: int
     amount_paise: int
     dest_kind: str
     dest_value: str

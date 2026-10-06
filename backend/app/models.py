@@ -6,7 +6,7 @@ Money is stored in paise (integer). All timestamps are UTC.
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -33,6 +33,16 @@ class BottleStatus(str, Enum):
     HELD = "HELD"             # in holding chamber
     ACCEPTED = "ACCEPTED"
     RETURNED = "RETURNED"
+
+
+class BottleState(str, Enum):
+    """State of one bottle of a session (batch)."""
+
+    CHECKING = "CHECKING"
+    VALID = "VALID"           # eligible, waiting in its lane's holding chamber
+    REJECTED = "REJECTED"     # failed a check, handed back
+    ACCEPTED = "ACCEPTED"     # in the bin, refunded
+    RETURNED = "RETURNED"     # was valid but handed back (payout failed / cancelled)
 
 
 class Machine(Base):
@@ -69,6 +79,7 @@ class RefundClaim(Base):
     brand: Mapped[str] = mapped_column(String(16))
     status: Mapped[ClaimStatus] = mapped_column(String(16))
     session_id: Mapped[str] = mapped_column(String(64))
+    lane: Mapped[int] = mapped_column(Integer, default=1)
     machine_id: Mapped[str] = mapped_column(ForeignKey("machines.id"))
     reserved_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -99,13 +110,34 @@ class RvmSession(Base):
     ended_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class SessionBottle(Base):
+    """One bottle of a customer session; a session holds up to one bottle per lane."""
+
+    __tablename__ = "session_bottles"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("rvm_sessions.id"), index=True)
+    machine_id: Mapped[str] = mapped_column(ForeignKey("machines.id"))
+    lane: Mapped[int] = mapped_column(Integer)
+    refund_serial: Mapped[str | None] = mapped_column(String(64))
+    mfg_serial: Mapped[str | None] = mapped_column(String(64))
+    brand: Mapped[str | None] = mapped_column(String(16))
+    status: Mapped[BottleState] = mapped_column(String(16), default=BottleState.CHECKING)
+    reason: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    __table_args__ = (UniqueConstraint("session_id", "lane", name="uq_session_bottle_lane"),)
+
+
 class Transaction(Base):
     __tablename__ = "transactions"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)          # TXN-XXXXXXXXXXXX
     session_id: Mapped[str] = mapped_column(ForeignKey("rvm_sessions.id"), unique=True)  # idempotency
     machine_id: Mapped[str] = mapped_column(ForeignKey("machines.id"), index=True)
-    refund_serial: Mapped[str] = mapped_column(String(64))
+    refund_serial: Mapped[str] = mapped_column(String(64))   # first bottle of the batch
+    bottle_count: Mapped[int] = mapped_column(Integer, default=1)
     amount_paise: Mapped[int] = mapped_column(BigInteger)
     dest_kind: Mapped[str] = mapped_column(String(8))                        # upi | mobile
     dest_value: Mapped[str] = mapped_column(String(255))

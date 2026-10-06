@@ -28,7 +28,7 @@ def fast_config(port: int) -> MachineConfig:
         flow=FlowConfig(
             payout_poll_interval_s=0.05, payout_pending_wait_s=0.3,
             fault_retry_interval_s=0.2, hand_retry_interval_s=0.1,
-            customer_input_timeout_s=2.0, backend_check_interval_s=0.1,
+            customer_input_timeout_s=2.0, backend_check_interval_s=0.1, batch_window_s=0.3,
         ),
         qr={"test_signing_secret": SECRET},
     )
@@ -56,12 +56,16 @@ class Rig:
                 await asyncio.sleep(0.01)
         await asyncio.wait_for(_w(), timeout)
 
-    async def insert_and_wait(self, timeout: float = 8.0):
-        """Insert the next feed bottle and return the finished session."""
+    async def insert_and_wait(self, lanes: int | list[int] = 1, gap_s: float = 0.0, timeout: float = 10.0):
+        """Insert feed bottles (1 = one bottle, 3 = all inlets, or explicit lanes) and
+        return the finished session."""
         await self.wait_state(MachineState.READY)
         await asyncio.sleep(0.1)  # let OPEN_INLET finish
         n = len(self.orch.sessions)
-        assert self.sim.insert_bottle(), "simulator refused insertion"
+        for lane in (range(1, lanes + 1) if isinstance(lanes, int) else lanes):
+            assert self.sim.insert_bottle(lane), f"simulator refused insertion in lane {lane}"
+            if gap_s:
+                await asyncio.sleep(gap_s)
 
         async def _w():
             while len(self.orch.sessions) == n:
@@ -73,14 +77,15 @@ class Rig:
 @pytest.fixture
 def make_rig():
     @asynccontextmanager
-    async def _make(bottles: list[SimBottle], customer_driver: str = "auto", **cfg_overrides):
+    async def _make(bottles: list[SimBottle], customer_driver: str = "auto", lanes: int = 3, **cfg_overrides):
         port = next(_ports)
         cfg = fast_config(port)
         cfg.customer_driver = customer_driver
+        cfg.plc.lanes = lanes
         for k, v in cfg_overrides.items():
             setattr(cfg.flow, k, v)
         feed = SimBottleFeed(bottles)
-        sim = PLCSimulator(port=port, time_scale=cfg.simulator.time_scale, on_insert=feed.advance)
+        sim = PLCSimulator(port=port, time_scale=cfg.simulator.time_scale, on_insert=feed.advance, lanes=lanes)
         await sim.start()
         orch, plc, bus = build(cfg, feed)
         await plc.start()

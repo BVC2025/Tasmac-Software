@@ -13,6 +13,7 @@ from .sim_feed import SimBottleFeed
 
 @dataclass
 class Frame:
+    lane: int
     angle_index: int
     image: Any = None  # numpy array in the real implementation
 
@@ -26,13 +27,15 @@ class InspectionResult:
 
 
 class Camera(ABC):
+    """One camera per lane (multi-channel machine); `lane` selects it."""
+
     @abstractmethod
-    async def capture(self, angle_index: int) -> Frame: ...
+    async def capture(self, lane: int, angle_index: int) -> Frame: ...
 
 
 class BottleInspector(ABC):
     @abstractmethod
-    async def inspect(self, frames: list[Frame]) -> InspectionResult: ...
+    async def inspect(self, lane: int, frames: list[Frame]) -> InspectionResult: ...
 
 
 class QRReader(ABC):
@@ -45,16 +48,16 @@ class QRReader(ABC):
 
 
 class MockCamera(Camera):
-    async def capture(self, angle_index: int) -> Frame:
-        return Frame(angle_index=angle_index)
+    async def capture(self, lane: int, angle_index: int) -> Frame:
+        return Frame(lane=lane, angle_index=angle_index)
 
 
 class MockInspector(BottleInspector):
     def __init__(self, feed: SimBottleFeed):
         self.feed = feed
 
-    async def inspect(self, frames: list[Frame]) -> InspectionResult:
-        cond = self.feed.current.condition
+    async def inspect(self, lane: int, frames: list[Frame]) -> InspectionResult:
+        cond = self.feed.at(lane).condition
         if cond == "ok":
             return InspectionResult(ok=True, confidence=0.97)
         return InspectionResult(ok=False, reason=cond.upper(), confidence=0.93)
@@ -66,7 +69,7 @@ class MockQRReader(QRReader):
         self.angles_per_turn = angles_per_turn
 
     async def decode(self, frame: Frame) -> list[str]:
-        b = self.feed.current
+        b = self.feed.at(frame.lane)
         angle = frame.angle_index % self.angles_per_turn
         codes = []
         if b.refund_qr and angle == b.refund_angle:

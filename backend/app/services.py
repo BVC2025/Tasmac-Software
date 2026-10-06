@@ -20,7 +20,7 @@ from . import qr
 from .alerts import raise_alert
 from .config import get_settings
 from .models import (
-    AlertType, AuditLog, BottleStatus, ClaimStatus, EligibleBrand, Machine, RefundClaim, RvmSession,
+    AlertType, AuditLog, BottleState, BottleStatus, SessionBottle, ClaimStatus, EligibleBrand, Machine, RefundClaim, RvmSession,
     SmsMessage, Transaction, TxnStatus, utcnow,
 )
 from .providers import PayoutResult, get_payout_provider, get_sms_provider
@@ -74,17 +74,34 @@ async def get_or_create_session(db: AsyncSession, machine: Machine, session_id: 
     return s
 
 
+async def _bottle(db: AsyncSession, s: RvmSession, lane: int) -> SessionBottle:
+    """The session's bottle in a lane (created on first use)."""
+    res = await db.execute(select(SessionBottle).where(SessionBottle.session_id == s.id, SessionBottle.lane == lane))
+    b = res.scalar_one_or_none()
+    if b is None:
+        b = SessionBottle(session_id=s.id, machine_id=s.machine_id, lane=lane, status=BottleState.CHECKING)
+        db.add(b)
+        await db.flush()
+    return b
+
+
+def _reject(b: SessionBottle, reason: str) -> None:
+    if b.status in (BottleState.CHECKING, BottleState.VALID):
+        b.status, b.reason = BottleState.REJECTED, reason
+
+
 async def _claim_for_update(db: AsyncSession, serial: str) -> RefundClaim | None:
     res = await db.execute(select(RefundClaim).where(RefundClaim.refund_serial == serial).with_for_update())
     return res.scalar_one_or_none()
 
 
-def _claim_blocks(claim: RefundClaim | None, session_id: str) -> str | None:
+def _claim_blocks(claim: RefundClaim | None, session_id: str, lane: int) -> str | None:
     if claim is None:
         return None
     if claim.status == ClaimStatus.CONSUMED:
         return "REFUND_QR_ALREADY_USED"
-    if (claim.status == ClaimStatus.RESERVED and claim.session_id != session_id
+    # Reserved by another session, or by another bottle of the same batch (copied sticker)
+    if (claim.status == ClaimStatus.RESERVED and (claim.session_id != session_id or claim.lane != lane)
             and claim.reserved_until and claim.reserved_until > utcnow()):
         return "REFUND_QR_IN_USE"
     return None
@@ -96,76 +113,108 @@ async def _mfg_consumed(db: AsyncSession, mfg_serial: str) -> bool:
     return res.first() is not None
 
 
-# ---------------- QR verification ----------------
+# ---------------- QR verification (per bottle / lane) ----------------
 
-async def verify_refund_qr(db: AsyncSession, machine: Machine, session_id: str, raw: str) -> Verdict:
+async def verify_refund_qr(db: AsyncSession, machine: Machine, session_id: str, raw: str, lane: int = 1) -> Verdict:
     s = await get_or_create_session(db, machine, session_id)
+    b = await _bottle(db, s, lane)
     try:
         r = qr.parse_refund(raw, settings.qr_signing_secret)
     except qr.QRError as e:
-        audit(db, f"machine:{machine.id}", "REFUND_QR_REJECTED", "session", session_id, reason=e.code)
+        _reject(b, e.code)
+        audit(db, f"machine:{machine.id}", "REFUND_QR_REJECTED", "session", session_id, reason=e.code, lane=lane)
         await db.commit()
         return Verdict(False, e.code)
-    s.refund_serial = r.serial
-    blocked = _claim_blocks(await db.get(RefundClaim, r.serial), session_id)
+    b.refund_serial = r.serial
+    s.refund_serial = s.refund_serial or r.serial
+    blocked = _claim_blocks(await db.get(RefundClaim, r.serial), session_id, lane)
     if blocked:
+        _reject(b, blocked)
         audit(db, f"machine:{machine.id}", "REFUND_QR_REJECTED", "session", session_id,
-              reason=blocked, serial=r.serial)
+              reason=blocked, serial=r.serial, lane=lane)
     await db.commit()
     return Verdict(False, blocked) if blocked else Verdict(True, data={"serial": r.serial})
 
 
-async def verify_mfg_qr(db: AsyncSession, machine: Machine, session_id: str, raw: str) -> Verdict:
+async def verify_mfg_qr(db: AsyncSession, machine: Machine, session_id: str, raw: str, lane: int = 1) -> Verdict:
     s = await get_or_create_session(db, machine, session_id)
+    b = await _bottle(db, s, lane)
     try:
         m = qr.parse_mfg(raw, settings.qr_signing_secret)
     except qr.QRError as e:
+        _reject(b, e.code)
         await db.commit()
         return Verdict(False, e.code)
-    s.mfg_serial, s.brand = m.serial, m.brand
-    await db.commit()
+    b.mfg_serial, b.brand = m.serial, m.brand
+    s.mfg_serial, s.brand = s.mfg_serial or m.serial, s.brand or m.brand
     if await _mfg_consumed(db, m.serial):
+        _reject(b, "BOTTLE_ALREADY_RETURNED")
+        await db.commit()
         return Verdict(False, "BOTTLE_ALREADY_RETURNED")
+    await db.commit()
     return Verdict(True, data={"brand": m.brand, "batch": m.batch, "serial": m.serial})
 
 
+async def _eligibility_rejected(db: AsyncSession, machine: Machine, session_id: str, lane: int, reason: str) -> Verdict:
+    s = await get_or_create_session(db, machine, session_id)
+    _reject(await _bottle(db, s, lane), reason)
+    await db.commit()
+    return Verdict(False, reason)
+
+
 async def check_eligibility(db: AsyncSession, machine: Machine, session_id: str,
-                            refund_raw: str, mfg_raw: str) -> Verdict:
+                            refund_raw: str, mfg_raw: str, lane: int = 1) -> Verdict:
     s = await get_or_create_session(db, machine, session_id)
     try:
         r = qr.parse_refund(refund_raw, settings.qr_signing_secret)
         m = qr.parse_mfg(mfg_raw, settings.qr_signing_secret)
     except qr.QRError as e:
-        return Verdict(False, e.code)
+        return await _eligibility_rejected(db, machine, session_id, lane, e.code)
 
     brand = await db.get(EligibleBrand, m.brand)
     if brand is None or not brand.active:
-        return Verdict(False, "BRAND_NOT_ELIGIBLE")
+        return await _eligibility_rejected(db, machine, session_id, lane, "BRAND_NOT_ELIGIBLE")
     if await _mfg_consumed(db, m.serial):
-        return Verdict(False, "BOTTLE_ALREADY_RETURNED")
+        return await _eligibility_rejected(db, machine, session_id, lane, "BOTTLE_ALREADY_RETURNED")
     res = await db.execute(select(RefundClaim.refund_serial).where(
         RefundClaim.mfg_serial == m.serial, RefundClaim.status == ClaimStatus.RESERVED,
-        RefundClaim.session_id != session_id, RefundClaim.reserved_until > utcnow()))
+        (RefundClaim.session_id != session_id) | (RefundClaim.lane != lane),
+        RefundClaim.reserved_until > utcnow()))
     if res.first():
-        return Verdict(False, "BOTTLE_IN_USE")
+        return await _eligibility_rejected(db, machine, session_id, lane, "BOTTLE_IN_USE")
 
     # Reserve the refund QR - insert if new, then lock the row
     until = utcnow() + timedelta(seconds=settings.reservation_ttl_s)
     await db.execute(pg_insert(RefundClaim).values(
         refund_serial=r.serial, mfg_serial=m.serial, brand=m.brand, status=ClaimStatus.RESERVED,
-        session_id=session_id, machine_id=machine.id, reserved_until=until,
+        session_id=session_id, lane=lane, machine_id=machine.id, reserved_until=until,
     ).on_conflict_do_nothing(index_elements=["refund_serial"]))
     claim = await _claim_for_update(db, r.serial)
-    blocked = _claim_blocks(claim, session_id)
+    blocked = _claim_blocks(claim, session_id, lane)
     if blocked:
-        await db.rollback()
-        return Verdict(False, blocked)
+        # nothing was inserted (ON CONFLICT DO NOTHING); record the rejection, release the row lock
+        return await _eligibility_rejected(db, machine, session_id, lane, blocked)
     claim.mfg_serial, claim.brand, claim.status = m.serial, m.brand, ClaimStatus.RESERVED
-    claim.session_id, claim.machine_id, claim.reserved_until = session_id, machine.id, until
-    s.refund_serial, s.mfg_serial, s.brand = r.serial, m.serial, m.brand
-    audit(db, f"machine:{machine.id}", "REFUND_QR_RESERVED", "claim", r.serial, session_id=session_id)
+    claim.session_id, claim.lane, claim.machine_id, claim.reserved_until = session_id, lane, machine.id, until
+    b = await _bottle(db, s, lane)
+    b.refund_serial, b.mfg_serial, b.brand, b.status, b.reason = r.serial, m.serial, m.brand, BottleState.VALID, None
+    audit(db, f"machine:{machine.id}", "REFUND_QR_RESERVED", "claim", r.serial, session_id=session_id, lane=lane)
     await db.commit()
     return Verdict(True, data={"amount_paise": settings.refund_amount_paise})
+
+
+async def bottle_rejected(db: AsyncSession, machine: Machine, session_id: str, lane: int, reason: str) -> None:
+    """The machine handed one bottle of the batch back (vision fail, QR missing, ...)."""
+    s = await get_or_create_session(db, machine, session_id)
+    b = await _bottle(db, s, lane)
+    _reject(b, reason)
+    res = await db.execute(select(RefundClaim).where(
+        RefundClaim.session_id == session_id, RefundClaim.lane == lane,
+        RefundClaim.status == ClaimStatus.RESERVED).with_for_update())
+    for claim in res.scalars():
+        claim.status, claim.reserved_until = ClaimStatus.RELEASED, None
+    audit(db, f"machine:{machine.id}", "BOTTLE_REJECTED", "session", session_id, lane=lane, reason=reason)
+    await db.commit()
 
 
 # ---------------- destination + transaction ----------------
@@ -210,20 +259,23 @@ async def create_transaction(db: AsyncSession, machine: Machine, session_id: str
         return existing  # idempotent retry from the machine
     s = await get_or_create_session(db, machine, session_id)
     res = await db.execute(select(RefundClaim).where(
-        RefundClaim.session_id == session_id, RefundClaim.status == ClaimStatus.RESERVED).with_for_update())
-    claim = res.scalar_one_or_none()
-    if claim is None or claim.reserved_until < utcnow():
+        RefundClaim.session_id == session_id, RefundClaim.status == ClaimStatus.RESERVED,
+        RefundClaim.reserved_until > utcnow()).order_by(RefundClaim.lane).with_for_update())
+    claims = res.scalars().all()
+    if not claims:
         raise DomainError("NO_ACTIVE_RESERVATION")
     kind, value = normalize_destination(kind, value)
     sms = normalize_mobile(sms_mobile) if sms_mobile else None
+    # One payout for every eligible bottle of the batch; the server decides the amount
     txn = Transaction(
         id=f"TXN-{uuid.uuid4().hex[:12].upper()}", session_id=s.id, machine_id=machine.id,
-        refund_serial=claim.refund_serial, amount_paise=settings.refund_amount_paise,
+        refund_serial=claims[0].refund_serial, bottle_count=len(claims),
+        amount_paise=settings.refund_amount_paise * len(claims),
         dest_kind=kind, dest_value=value, sms_mobile=sms, provider=get_payout_provider().name,
     )
     db.add(txn)
-    audit(db, f"machine:{machine.id}", "TXN_CREATED", "transaction", txn.id,
-          session_id=session_id, dest=mask(kind, value))
+    audit(db, f"machine:{machine.id}", "TXN_CREATED", "transaction", txn.id, session_id=session_id,
+          dest=mask(kind, value), bottles=len(claims), amount_paise=txn.amount_paise)
     await db.commit()
     return txn
 
@@ -297,12 +349,19 @@ async def apply_payout_result(db: AsyncSession, txn: Transaction, result: Payout
 
 async def bottle_accepted(db: AsyncSession, machine: Machine, session_id: str, txn_id: str | None) -> None:
     s = await get_or_create_session(db, machine, session_id)
-    res = await db.execute(select(RefundClaim).where(RefundClaim.session_id == session_id).with_for_update())
-    claim = res.scalar_one_or_none()
-    if claim is None:
+    res = await db.execute(select(RefundClaim).where(
+        RefundClaim.session_id == session_id,
+        RefundClaim.status.in_([ClaimStatus.RESERVED, ClaimStatus.CONSUMED])).with_for_update())
+    claims = res.scalars().all()
+    if not claims:
         raise DomainError("NO_ACTIVE_RESERVATION")
-    if claim.status != ClaimStatus.CONSUMED:
-        claim.status, claim.consumed_at, claim.reserved_until = ClaimStatus.CONSUMED, utcnow(), None
+    for claim in claims:
+        if claim.status != ClaimStatus.CONSUMED:
+            claim.status, claim.consumed_at, claim.reserved_until = ClaimStatus.CONSUMED, utcnow(), None
+    bottles = (await db.execute(select(SessionBottle).where(
+        SessionBottle.session_id == session_id, SessionBottle.status == BottleState.VALID))).scalars().all()
+    for b in bottles:
+        b.status = BottleState.ACCEPTED
     s.outcome, s.reason, s.ended_at = "ACCEPTED", None, utcnow()
     if txn_id:
         txn = await get_txn_for_machine(db, machine, txn_id, lock=True)
@@ -316,9 +375,12 @@ async def bottle_returned(db: AsyncSession, machine: Machine, session_id: str, r
     s = await get_or_create_session(db, machine, session_id)
     res = await db.execute(select(RefundClaim).where(
         RefundClaim.session_id == session_id, RefundClaim.status == ClaimStatus.RESERVED).with_for_update())
-    claim = res.scalar_one_or_none()
-    if claim:
+    for claim in res.scalars():
         claim.status, claim.reserved_until = ClaimStatus.RELEASED, None
+    bottles = (await db.execute(select(SessionBottle).where(
+        SessionBottle.session_id == session_id, SessionBottle.status == BottleState.VALID))).scalars().all()
+    for b in bottles:
+        b.status, b.reason = BottleState.RETURNED, reason[:64]
     txn = (await db.execute(select(Transaction).where(Transaction.session_id == session_id))).scalar_one_or_none()
     if txn:
         txn.bottle_status = BottleStatus.RETURNED
@@ -352,8 +414,9 @@ async def maybe_send_sms(db: AsyncSession, txn: Transaction) -> None:
     txn.sms_sent = True
     if not mobile:
         return
+    bottles = f"{txn.bottle_count} bottles" if txn.bottle_count > 1 else "your bottle"
     body = (f"Rs.{txn.amount_paise / 100:.2f} refunded to {mask(txn.dest_kind, txn.dest_value)} "
-            f"for your bottle return at {txn.machine_id}. Ref {txn.id}. -TASMAC")
+            f"for returning {bottles} at {txn.machine_id}. Ref {txn.id}. -TASMAC")
     try:
         sent, ref = await get_sms_provider().send(mobile, body)
     except Exception as e:

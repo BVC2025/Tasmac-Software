@@ -1,15 +1,23 @@
 """RVM machine orchestrator - the customer workflow as an async state machine.
 
-Flow (see README):
-  health check -> READY -> bottle detected -> position -> inspect ->
-  refund QR -> manufacturing QR -> eligibility -> park in holding chamber ->
-  refund method -> confirm -> payout -> accept bottle (or return it)
+One session = one customer = a batch of up to N bottles (one per lane/inlet):
+
+  health check -> READY -> first bottle -> COLLECTING (short window for the
+  other inlets) -> CHECKING: every lane in parallel runs
+      position -> inspect -> refund QR -> manufacturing QR -> eligibility
+      invalid -> handed back at that inlet right away
+      valid   -> parked in that lane's holding chamber
+  -> (at least one valid) refund method -> confirm (valid count x Rs.10)
+  -> payout -> SUCCESS: all held bottles to the bin, SMS
+               FAILED : all held bottles handed back
 
 Rules:
-  * The bottle is never sent to the bin before the payout is final
+  * A bottle never reaches the bin before its payout is final
     (or the pending policy says so).
+  * The customer is asked for the refund destination only after every
+    bottle of the batch has been checked.
   * Any PLC fault takes the machine OUT_OF_SERVICE; recovery decides what
-    to do with a bottle still inside.
+    to do with bottles still inside.
 """
 
 import asyncio
@@ -20,13 +28,13 @@ from datetime import datetime, timezone
 
 from ..config import MachineConfig
 from ..plc.base import PLC, PLCCommandError, PLCError, PLCFault, PLCTimeout
-from ..plc.registers import Cmd, CmdResult, Sensor
+from ..plc.registers import Cmd, CmdResult, LaneSensor, Sensor
 from ..services import qr_codec
 from ..services.backend import Backend, Destination, PayoutStatus
 from ..services.customer import CustomerInterface
 from ..services.session_log import SessionLog
 from ..services.vision import BottleInspector, Camera, Frame, QRReader
-from .events import EventBus, MachineState
+from .events import EventBus, LaneStep, MachineState
 
 log = logging.getLogger(__name__)
 
@@ -34,19 +42,20 @@ REFUND_AMOUNT_PAISE = 1000
 
 
 class Rejected(Exception):
-    """Session ends and the bottle is returned to the customer."""
+    """Session-level stop: every held bottle is handed back to the customer."""
 
     def __init__(self, reason: str):
         super().__init__(reason)
         self.reason = reason
 
 
-class Cancelled(Exception):
-    """Session ends without any bottle movement (bottle still with customer)."""
+class LaneRejected(Exception):
+    """One bottle of the batch is not accepted."""
 
-    def __init__(self, reason: str):
+    def __init__(self, reason: str, moved: bool = True):
         super().__init__(reason)
         self.reason = reason
+        self.moved = moved   # False: the bottle never left the inlet (nothing to hand back)
 
 
 class OutOfService(Exception):
@@ -54,14 +63,23 @@ class OutOfService(Exception):
 
 
 @dataclass
-class Session:
-    id: str = field(default_factory=lambda: uuid.uuid4().hex)
-    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+class Bottle:
+    lane: int
+    step: LaneStep = LaneStep.DETECTED
     frames: list[Frame] = field(default_factory=list)
     codes: list[str] = field(default_factory=list)
     refund_qr: str | None = None
     mfg_qr: str | None = None
-    reserved: bool = False
+    amount_paise: int = 0
+    reason: str = ""
+    handed_back: bool = False   # physically returned to the inlet
+
+
+@dataclass
+class Session:
+    id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    started_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
+    bottles: dict[int, Bottle] = field(default_factory=dict)
     destination: Destination | None = None
     sms_mobile: str | None = None
     input_source: str | None = None
@@ -69,6 +87,18 @@ class Session:
     payout_status: PayoutStatus | None = None
     outcome: str = "IN_PROGRESS"   # ACCEPTED | RETURNED | CANCELLED | ABORTED
     reason: str = ""
+
+    @property
+    def held(self) -> list[Bottle]:
+        """Valid bottles waiting in their holding chambers."""
+        return [b for b in self.bottles.values() if b.step == LaneStep.VALID]
+
+    @property
+    def amount_paise(self) -> int:
+        return sum(b.amount_paise for b in self.held)
+
+    def summary(self) -> list[dict]:
+        return [{"lane": b.lane, "step": b.step.value, "reason": b.reason} for b in sorted(self.bottles.values(), key=lambda b: b.lane)]
 
 
 class Orchestrator:
@@ -99,6 +129,10 @@ class Orchestrator:
         self.session_log = session_log
         self.fault_reason: str | None = None       # reported in the heartbeat
         self.backend_ok = True                     # kept up to date by watch_backend()
+
+    @property
+    def lanes(self) -> list[int]:
+        return self.plc.lanes
 
     # ======================= main loop =======================
 
@@ -141,6 +175,10 @@ class Orchestrator:
         """UI message code - the kiosk maps codes to Tamil/English text."""
         self.bus.publish("message", code=code, **data)
 
+    def _lane_step(self, b: Bottle, step: LaneStep, **data) -> None:
+        b.step = step
+        self.bus.publish("lane", lane=b.lane, step=step.value, reason=b.reason or None, **data)
+
     # ======================= health / faults =======================
 
     async def _health_check(self) -> None:
@@ -159,8 +197,8 @@ class Orchestrator:
             raise OutOfService("SERVICE_DOOR_OPEN")
         if not await self._safe_backend(self.backend.health(), default=False):
             raise OutOfService("BACKEND_UNREACHABLE")
-        await self._dispose_leftover_bottle()
-        log.info("Health check OK (PLC v%s, bin %s%%)", s.plc_version, s.bin_fill_pct)
+        await self._dispose_leftover_bottles()
+        log.info("Health check OK (PLC v%s, %s lanes, bin %s%%)", s.plc_version, len(self.lanes), s.bin_fill_pct)
 
     async def _out_of_service(self, reason: str) -> None:
         log.error("OUT OF SERVICE: %s", reason)
@@ -177,42 +215,43 @@ class Orchestrator:
             except PLCError as e:
                 log.warning("PLC fault reset failed: %s", e)
 
-    async def _dispose_leftover_bottle(self) -> None:
-        """After a fault, a bottle may still be inside. Paid -> bin, otherwise -> customer."""
+    async def _dispose_leftover_bottles(self) -> None:
+        """After a fault, bottles may still be inside. Paid -> bin, otherwise -> customer."""
         s = self.plc.status
-        if not (s.has(Sensor.BOTTLE_IN_SCAN_POSITION) or s.has(Sensor.BOTTLE_IN_HOLD)):
+        inside = [ln for ln in self.lanes
+                  if s.lane_has(ln, LaneSensor.BOTTLE_IN_SCAN_POSITION) or s.lane_has(ln, LaneSensor.BOTTLE_IN_HOLD)]
+        if not inside:
             return
         last = self._last_session
         paid = last is not None and last.payout_status in (PayoutStatus.SUCCESS, PayoutStatus.PENDING)
-        log.warning("Leftover bottle found after fault (paid=%s)", paid)
+        log.warning("Leftover bottles in lanes %s after fault (paid=%s)", inside, paid)
         if paid:
-            await self.plc.command(Cmd.ACCEPT_BOTTLE)
+            await self._parallel([self.plc.command(Cmd.ACCEPT_BOTTLE, lane=ln) for ln in inside])
             await self._safe_backend(self.backend.bottle_accepted(last.id, last.txn_id))
         else:
-            await self.plc.command(Cmd.REJECT_BOTTLE)
+            await self._parallel([self.plc.command(Cmd.REJECT_BOTTLE, lane=ln) for ln in inside])
             if last:
                 await self._safe_backend(self.backend.bottle_returned(last.id, "FAULT_RECOVERY"))
-            await self._wait_bottle_taken()
+            await self._wait_taken(inside)
 
     # ======================= one customer =======================
 
     async def _serve_one_customer(self) -> None:
         self.fault_reason = None
-        self._set_state(MachineState.READY)
-        await self.plc.command(Cmd.OPEN_INLET)
+        self._set_state(MachineState.READY, lanes=self.lanes)
+        await self._parallel([self.plc.command(Cmd.OPEN_INLET, lane=ln) for ln in self.lanes])
         self._message("INSERT_BOTTLE")
-        await self._wait_for_bottle()
+        first = await self._wait_for_bottle()
 
         session = Session()
         self._last_session = session
-        self.bus.publish("session_started", session_id=session.id)
+        self.bus.publish("session_started", session_id=session.id, lane=first)
         try:
-            await self._process(session)
-        except Rejected as r:
-            await self._return_bottle(session, r.reason)
-        except Cancelled as c:
-            session.outcome, session.reason = "CANCELLED", c.reason
-            await self._safe_backend(self.backend.bottle_returned(session.id, c.reason))
+            try:
+                await self._process(session, first)
+            except Rejected as r:
+                await self._return_held(session, r.reason)
+            await self._wait_taken([b.lane for b in session.bottles.values() if b.handed_back])
         except PLCError as e:
             session.outcome, session.reason = "ABORTED", str(e)
             raise
@@ -223,135 +262,198 @@ class Orchestrator:
                     self.session_log.record(session)
                 except Exception:
                     log.exception("Local session log write failed")
+            accepted = [b for b in session.bottles.values() if b.step == LaneStep.ACCEPTED]
             self.bus.publish(
-                "session_ended", session_id=session.id, outcome=session.outcome,
-                reason=session.reason, txn_id=session.txn_id,
+                "session_ended", session_id=session.id, outcome=session.outcome, reason=session.reason,
+                txn_id=session.txn_id, bottles=session.summary(), accepted=len(accepted),
+                amount_paise=sum(b.amount_paise for b in accepted),
             )
-            log.info("SESSION %s %s %s", session.id[:8], session.outcome, session.reason)
+            log.info("SESSION %s %s %s %s", session.id[:8], session.outcome, session.reason,
+                     [(b["lane"], b["step"]) for b in session.summary()])
 
-    async def _wait_for_bottle(self) -> None:
-        """Wait for a bottle; stop accepting bottles if the central server goes away."""
+    async def _wait_for_bottle(self) -> int:
+        """Wait for a bottle in any inlet; stop accepting bottles if the central server goes away."""
         while True:
             try:
-                await self.plc.wait_for(Sensor.BOTTLE_AT_INLET, timeout=1.0)
-                return
+                return await self.plc.wait_any_lane(LaneSensor.BOTTLE_AT_INLET, timeout=1.0)
             except PLCTimeout:
                 if not self.backend_ok:
-                    try:
-                        await self.plc.command(Cmd.CLOSE_INLET)
-                    except PLCCommandError:
-                        pass  # hand in inlet; out of service anyway
+                    await self._close_inlets(self.lanes)
                     raise OutOfService("BACKEND_UNREACHABLE")
 
-    async def _process(self, session: Session) -> None:
-        # ---- 1. detection + positioning ----
-        self._set_state(MachineState.BOTTLE_DETECTED, session_id=session.id)
-        await self._close_inlet()
-        self._set_state(MachineState.POSITIONING)
-        try:
-            await self.plc.command(Cmd.MOVE_TO_SCAN)
-        except PLCCommandError as e:
-            if e.result == CmdResult.NO_BOTTLE:
-                raise Cancelled("BOTTLE_REMOVED")
-            raise
-        await self.plc.wait_for(Sensor.BOTTLE_IN_SCAN_POSITION, timeout=3)
+    async def _collect(self, session: Session, first: int) -> list[int]:
+        """After the first bottle, give the customer a moment to fill the other inlets."""
+        lanes = {first}
+        if len(self.lanes) > 1 and self.flow.batch_window_s > 0:
+            self._set_state(MachineState.COLLECTING, session_id=session.id, lanes=sorted(lanes),
+                            timeout_s=self.flow.batch_window_s)
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + self.flow.batch_window_s
+            while loop.time() < deadline and len(lanes) < len(self.lanes):
+                await asyncio.sleep(0.1)
+                self.plc.check_healthy()
+                now = {ln for ln in self.lanes if self.plc.status.lane_has(ln, LaneSensor.BOTTLE_AT_INLET)}
+                if now - lanes:
+                    lanes |= now
+                    self.bus.publish("state", state=MachineState.COLLECTING.value, session_id=session.id,
+                                     lanes=sorted(lanes), timeout_s=self.flow.batch_window_s)
+        return sorted(lanes)
 
-        # ---- 2. image capture + condition inspection ----
-        self._set_state(MachineState.INSPECTING)
-        await self.plc.command(Cmd.LIGHT_ON)
-        for _ in range(self.flow.inspection_angles):
-            await self._capture_and_rotate(session)
-        result = await self.inspector.inspect(session.frames)
-        if not result.ok:
-            raise Rejected(f"BOTTLE_{result.reason or 'INVALID'}")
+    async def _process(self, session: Session, first: int) -> None:
+        # ---- 1. collect the batch, close the inlets without a bottle ----
+        lanes = await self._collect(session, first)
+        await self._close_inlets([ln for ln in self.lanes if ln not in lanes])
 
-        # ---- 3. refund QR ----
-        self._set_state(MachineState.SCANNING_REFUND_QR)
-        session.refund_qr = await self._find_qr(session, "refund")
-        if not session.refund_qr:
-            raise Rejected("REFUND_QR_NOT_FOUND")
-        v = await self._backend_or_reject(self.backend.verify_refund_qr(session.id, session.refund_qr))
-        if not v.ok:
-            raise Rejected(v.reason)
+        # ---- 2. every lane checks its bottle in parallel ----
+        for ln in lanes:
+            session.bottles[ln] = Bottle(lane=ln)
+        self._set_state(MachineState.CHECKING, session_id=session.id, lanes=lanes)
+        await self._parallel([self._check_lane(session, session.bottles[ln]) for ln in lanes])
 
-        # ---- 4. manufacturing QR ----
-        self._set_state(MachineState.SCANNING_MFG_QR)
-        session.mfg_qr = await self._find_qr(session, "mfg")
-        if not session.mfg_qr:
-            raise Rejected("MFG_QR_NOT_FOUND")
-        v = await self._backend_or_reject(self.backend.verify_mfg_qr(session.id, session.mfg_qr))
-        if not v.ok:
-            raise Rejected(v.reason)
+        held = session.held
+        rejected = [b for b in session.bottles.values() if b.step == LaneStep.REJECTED]
+        if not held:
+            session.outcome = "RETURNED"
+            session.reason = rejected[0].reason if rejected else "NO_BOTTLE"
+            self._set_state(MachineState.REJECTING, reason=session.reason, bottles=session.summary())
+            self._message("TAKE_BACK_BOTTLE")
+            return
 
-        # ---- 5. eligibility (reserves the refund QR on the server) ----
-        self._set_state(MachineState.VERIFYING)
-        v = await self._backend_or_reject(
-            self.backend.check_eligibility(session.id, session.refund_qr, session.mfg_qr)
-        )
-        if not v.ok:
-            raise Rejected(v.reason)
-        session.reserved = True
-        amount = int(v.data.get("amount_paise", REFUND_AMOUNT_PAISE))
-        await self.plc.command(Cmd.LIGHT_OFF)
-        await self.plc.command(Cmd.MOVE_TO_HOLD)
+        amount = session.amount_paise
+        self._message("BATCH_RESULT", accepted=len(held), rejected=len(rejected), amount_paise=amount,
+                      bottles=session.summary())
 
-        # ---- 6. refund destination + confirmation ----
-        session.destination = await self._collect_destination(session, amount)
+        # ---- 3. refund destination + confirmation (once, for the whole batch) ----
+        session.destination = await self._collect_destination(session, amount, len(held))
 
-        # ---- 7. payout ----
-        self._set_state(MachineState.PAYING)
-        self._message("PROCESSING_PAYMENT")
+        # ---- 4. payout ----
+        self._set_state(MachineState.PAYING, amount_paise=amount, bottle_count=len(held))
+        self._message("PROCESSING_PAYMENT", amount_paise=amount)
         status = await self._payout(session, amount)
 
-        # ---- 8. result ----
+        # ---- 5. result ----
         if status == PayoutStatus.SUCCESS:
-            await self._accept_bottle(session, "REFUND_SUCCESS")
+            await self._accept_held(session, "REFUND_SUCCESS")
         elif status == PayoutStatus.FAILED:
             raise Rejected("PAYOUT_FAILED")
         elif self.flow.on_payout_pending_timeout == "accept":
             # Server keeps reconciling; customer gets SMS when it completes.
-            await self._accept_bottle(session, "REFUND_PENDING")
+            await self._accept_held(session, "REFUND_PENDING")
         else:
             raise Rejected("PAYOUT_PENDING")
 
-    # ======================= steps =======================
+    # ======================= one lane =======================
 
-    async def _close_inlet(self) -> None:
-        for attempt in range(self.flow.close_inlet_retries):
+    async def _check_lane(self, session: Session, b: Bottle) -> None:
+        ln = b.lane
+        try:
+            self._lane_step(b, LaneStep.DETECTED)
+            await self._close_inlet(ln)
+
+            self._lane_step(b, LaneStep.POSITIONING)
             try:
-                await self.plc.command(Cmd.CLOSE_INLET)
+                await self.plc.command(Cmd.MOVE_TO_SCAN, lane=ln)
+            except PLCCommandError as e:
+                if e.result == CmdResult.NO_BOTTLE:
+                    raise LaneRejected("BOTTLE_REMOVED", moved=False)
+                raise
+            await self.plc.wait_for_lane(ln, LaneSensor.BOTTLE_IN_SCAN_POSITION, timeout=3)
+
+            self._lane_step(b, LaneStep.INSPECTING)
+            await self.plc.command(Cmd.LIGHT_ON, lane=ln)
+            for _ in range(self.flow.inspection_angles):
+                await self._capture_and_rotate(b)
+            result = await self.inspector.inspect(ln, b.frames)
+            if not result.ok:
+                raise LaneRejected(f"BOTTLE_{result.reason or 'INVALID'}")
+
+            self._lane_step(b, LaneStep.SCANNING_REFUND_QR)
+            b.refund_qr = await self._find_qr(b, "refund")
+            if not b.refund_qr:
+                raise LaneRejected("REFUND_QR_NOT_FOUND")
+            v = await self._backend_or_lane_reject(self.backend.verify_refund_qr(session.id, b.refund_qr, ln))
+            if not v.ok:
+                raise LaneRejected(v.reason)
+
+            self._lane_step(b, LaneStep.SCANNING_MFG_QR)
+            b.mfg_qr = await self._find_qr(b, "mfg")
+            if not b.mfg_qr:
+                raise LaneRejected("MFG_QR_NOT_FOUND")
+            v = await self._backend_or_lane_reject(self.backend.verify_mfg_qr(session.id, b.mfg_qr, ln))
+            if not v.ok:
+                raise LaneRejected(v.reason)
+
+            # eligibility reserves the refund QR on the server for this session + lane
+            self._lane_step(b, LaneStep.VERIFYING)
+            v = await self._backend_or_lane_reject(
+                self.backend.check_eligibility(session.id, b.refund_qr, b.mfg_qr, ln))
+            if not v.ok:
+                raise LaneRejected(v.reason)
+            b.amount_paise = int(v.data.get("amount_paise", REFUND_AMOUNT_PAISE))
+            await self.plc.command(Cmd.LIGHT_OFF, lane=ln)
+            await self.plc.command(Cmd.MOVE_TO_HOLD, lane=ln)
+            self._lane_step(b, LaneStep.VALID, amount_paise=b.amount_paise)
+
+        except LaneRejected as r:
+            b.reason = r.reason
+            if r.moved:
+                try:
+                    await self.plc.command(Cmd.LIGHT_OFF, lane=ln)
+                except PLCCommandError:
+                    pass
+                await self.plc.command(Cmd.REJECT_BOTTLE, lane=ln)
+                b.handed_back = True
+            await self._safe_backend(self.backend.bottle_rejected(session.id, ln, r.reason))
+            self._lane_step(b, LaneStep.REJECTED)
+            self._message("BOTTLE_REJECTED", lane=ln, reason=r.reason)
+
+    async def _close_inlet(self, lane: int) -> None:
+        for _ in range(self.flow.close_inlet_retries):
+            try:
+                await self.plc.command(Cmd.CLOSE_INLET, lane=lane)
                 return
             except PLCCommandError as e:
                 if e.result != CmdResult.INTERLOCK:
                     raise
-                self._message("REMOVE_HAND")
+                self._message("REMOVE_HAND", lane=lane)
                 await asyncio.sleep(self.flow.hand_retry_interval_s)
-        raise Cancelled("HAND_IN_INLET")
+        raise LaneRejected("HAND_IN_INLET", moved=False)
 
-    async def _capture_and_rotate(self, session: Session) -> None:
-        frame = await self.camera.capture(len(session.frames))
-        session.frames.append(frame)
-        session.codes.extend(await self.qr_reader.decode(frame))
+    async def _close_inlets(self, lanes: list[int]) -> None:
+        async def close(ln: int) -> None:
+            try:
+                await self.plc.command(Cmd.CLOSE_INLET, lane=ln)
+            except PLCCommandError:
+                pass  # a hand in an empty inlet: nothing to protect
+        await self._parallel([close(ln) for ln in lanes])
+
+    async def _capture_and_rotate(self, b: Bottle) -> None:
+        frame = await self.camera.capture(b.lane, len(b.frames))
+        b.frames.append(frame)
+        b.codes.extend(await self.qr_reader.decode(frame))
         step = 360 // max(self.flow.inspection_angles, 1)
-        await self.plc.command(Cmd.ROTATE_BOTTLE, param=step)
+        await self.plc.command(Cmd.ROTATE_BOTTLE, param=step, lane=b.lane)
 
-    async def _find_qr(self, session: Session, kind: str) -> str | None:
+    async def _find_qr(self, b: Bottle, kind: str) -> str | None:
         """Use codes from inspection frames; rotate further if not found yet."""
         extra = 0
         while True:
-            for code in session.codes:
+            for code in b.codes:
                 if qr_codec.classify(code) == kind:
                     return code
             if extra >= self.flow.qr_scan_max_rotations:
                 return None
-            await self._capture_and_rotate(session)
+            await self._capture_and_rotate(b)
             extra += 1
 
-    async def _collect_destination(self, session: Session, amount: int) -> Destination:
+    # ======================= customer + payout =======================
+
+    async def _collect_destination(self, session: Session, amount: int, count: int) -> Destination:
         for attempt in range(1, self.flow.max_destination_attempts + 1):
             self._set_state(MachineState.SELECT_REFUND_METHOD, attempt=attempt,
                             max_attempts=self.flow.max_destination_attempts,
-                            timeout_s=self.flow.customer_input_timeout_s)
+                            timeout_s=self.flow.customer_input_timeout_s,
+                            amount_paise=amount, bottle_count=count)
             try:
                 inp = await asyncio.wait_for(
                     self.customer.get_destination(session.id, attempt),
@@ -380,7 +482,7 @@ class Orchestrator:
 
             self._set_state(MachineState.CONFIRMING, timeout_s=self.flow.customer_input_timeout_s)
             self._message("CONFIRM_REFUND", destination=dest.masked(), kind=dest.kind,
-                          name=v.data.get("name", ""), amount_paise=amount,
+                          name=v.data.get("name", ""), amount_paise=amount, bottle_count=count,
                           sms_mobile=("XXXXXX" + sms_mobile[-4:]) if sms_mobile else None,
                           sms=bool(sms_mobile or dest.sms_number))
             try:
@@ -412,43 +514,83 @@ class Orchestrator:
         log.info("Payout %s -> %s", session.txn_id, status.value)
         return status
 
-    async def _accept_bottle(self, session: Session, message: str) -> None:
-        self._set_state(MachineState.ACCEPTING)
-        await self.plc.command(Cmd.ACCEPT_BOTTLE)
+    async def _accept_held(self, session: Session, message: str) -> None:
+        held = session.held
+        amount = session.amount_paise
+        self._set_state(MachineState.ACCEPTING, bottle_count=len(held))
+        await self._parallel([self.plc.command(Cmd.ACCEPT_BOTTLE, lane=b.lane) for b in held])
+        for b in held:
+            self._lane_step(b, LaneStep.ACCEPTED)
         await self._safe_backend(self.backend.bottle_accepted(session.id, session.txn_id))
         session.outcome = "ACCEPTED"
         session.reason = message
-        self._message(message, txn_id=session.txn_id)
+        self._message(message, txn_id=session.txn_id, amount_paise=amount, bottle_count=len(held))
 
-    async def _return_bottle(self, session: Session, reason: str) -> None:
-        self._set_state(MachineState.REJECTING, reason=reason)
+    async def _return_held(self, session: Session, reason: str) -> None:
+        """Hand back every bottle still parked in a holding chamber."""
+        held = session.held
+        self._set_state(MachineState.REJECTING, reason=reason, bottles=session.summary())
         self._message("BOTTLE_REJECTED", reason=reason)
         session.outcome, session.reason = "RETURNED", reason
-        await self.plc.command(Cmd.LIGHT_OFF)
-        await self.plc.command(Cmd.REJECT_BOTTLE)
+
+        async def hand_back(b: Bottle) -> None:
+            try:
+                await self.plc.command(Cmd.LIGHT_OFF, lane=b.lane)
+            except PLCCommandError:
+                pass
+            await self.plc.command(Cmd.REJECT_BOTTLE, lane=b.lane)
+            b.handed_back = True
+            b.reason = reason
+            self._lane_step(b, LaneStep.RETURNED)
+
+        await self._parallel([hand_back(b) for b in held])
         await self._safe_backend(self.backend.bottle_returned(session.id, reason))
         self._message("TAKE_BACK_BOTTLE")
-        await self._wait_bottle_taken()
 
-    async def _wait_bottle_taken(self) -> None:
-        """Returned bottle must first appear at the inlet, then be taken away -
-        otherwise it would be picked up as a new insertion."""
+    async def _wait_taken(self, lanes: list[int]) -> None:
+        """Returned bottles must first appear at their inlet, then be taken away -
+        otherwise they would be picked up as new insertions."""
+        async def one(ln: int) -> None:
+            try:
+                await self.plc.wait_for_lane(ln, LaneSensor.BOTTLE_AT_INLET, present=True, timeout=3)
+            except PLCTimeout:
+                log.warning("Returned bottle not seen at inlet %s", ln)
+            await self.plc.wait_for_lane(ln, LaneSensor.BOTTLE_AT_INLET, present=False)
+        await self._parallel([one(ln) for ln in lanes])
+
+    # ======================= helpers =======================
+
+    @staticmethod
+    async def _parallel(coros: list) -> None:
+        """Run coroutines concurrently; if one fails, cancel the rest and re-raise."""
+        tasks = [asyncio.ensure_future(c) for c in coros]
+        if not tasks:
+            return
         try:
-            await self.plc.wait_for(Sensor.BOTTLE_AT_INLET, present=True, timeout=3)
-        except PLCTimeout:
-            log.warning("Returned bottle not seen at inlet")
-        await self.plc.wait_for(Sensor.BOTTLE_AT_INLET, present=False)
-
-    # ======================= backend helpers =======================
+            await asyncio.gather(*tasks)
+        except BaseException:
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+            raise
 
     async def _backend_or_reject(self, coro):
         try:
             return await coro
-        except (PLCError, Rejected, Cancelled):
+        except (PLCError, Rejected, LaneRejected):
             raise
         except Exception as e:  # network / server error before money moved
             log.error("Backend call failed: %s", e)
             raise Rejected("BACKEND_UNAVAILABLE") from e
+
+    async def _backend_or_lane_reject(self, coro):
+        try:
+            return await coro
+        except (PLCError, LaneRejected):
+            raise
+        except Exception as e:
+            log.error("Backend call failed: %s", e)
+            raise LaneRejected("BACKEND_UNAVAILABLE") from e
 
     async def _safe_backend(self, coro, default=None):
         try:

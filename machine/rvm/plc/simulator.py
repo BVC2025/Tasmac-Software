@@ -1,17 +1,18 @@
-"""Software PLC simulator (Modbus TCP server).
+"""Software PLC simulator (Modbus TCP server), multi-lane.
 
 Implements the same register map and handshake that the real PLC program
 must implement, so the whole machine flow can be developed and tested
-without hardware.
+without hardware. Each lane has its own sensors and command channel and
+lanes execute commands in parallel.
 
 Run standalone:
-    python -m rvm.plc.simulator --port 5020 --auto-insert 10
+    python -m rvm.plc.simulator --port 5020 --lanes 3
 
 Simulation-only control registers (not part of the real PLC map):
-    200 SIM_INSERT_BOTTLE   write 1 -> a bottle appears at the inlet
+    200 SIM_INSERT_BOTTLE   write a lane number (1..3) -> a bottle appears in that inlet
     201 SIM_ESTOP           1 = pressed, 0 = released
     202 SIM_JAM_NEXT        write 1 -> next motion command fails with JAM
-    203 SIM_HAND            1 = hand in the light curtain
+    203 SIM_HAND            lane number with a hand in the light curtain, 0 = none
 """
 
 import argparse
@@ -22,7 +23,10 @@ from typing import Callable
 from pymodbus.datastore import ModbusDeviceContext, ModbusSequentialDataBlock, ModbusServerContext
 from pymodbus.server import ModbusTcpServer
 
-from .registers import Cmd, CmdResult, CmdStatus, FaultCode, PlcState, ReadReg, Sensor, WriteReg
+from .registers import (
+    MACHINE_CMDS, Cmd, CmdReg, CmdResult, CmdStatus, FaultCode, LaneReg, LaneSensor, PlcState, ReadReg, Sensor,
+    WriteReg, cmd_base, lane_base,
+)
 
 log = logging.getLogger(__name__)
 
@@ -46,6 +50,8 @@ MOTION_CMDS = {Cmd.MOVE_TO_SCAN, Cmd.MOVE_TO_HOLD, Cmd.ACCEPT_BOTTLE, Cmd.REJECT
 BIN_CAPACITY = 500
 CUSTOMER_PICKUP_S = 1.5  # time for a customer to take a returned bottle
 
+S = LaneSensor
+
 
 class PLCSimulator:
     def __init__(
@@ -56,8 +62,9 @@ class PLCSimulator:
         read_base: int = 100,
         time_scale: float = 1.0,
         auto_insert_every_s: float | None = None,
-        on_insert: Callable[[], None] | None = None,
+        on_insert: Callable[[int], None] | None = None,
         pc_watchdog_s: float = 3.0,
+        lanes: int = 3,
     ):
         self.host, self.port = host, port
         self.wb, self.rb = write_base, read_base
@@ -65,6 +72,7 @@ class PLCSimulator:
         self.auto_insert_every_s = auto_insert_every_s
         self.on_insert = on_insert
         self.pc_watchdog_s = pc_watchdog_s
+        self.lanes = list(range(1, lanes + 1))
 
         self._hr = ModbusSequentialDataBlock(0, [0] * 512)
         ctx = ModbusServerContext(devices=ModbusDeviceContext(hr=self._hr), single=True)
@@ -73,13 +81,14 @@ class PLCSimulator:
 
         self.state = PlcState.BOOTING
         self.sensors = Sensor(0)
+        self.lane_sensors: dict[int, LaneSensor] = {lane: S(0) for lane in self.lanes}
         self.fault = FaultCode.NONE
         self.bin_count = 0
-        self._last_seq = 0
+        self._last_seq = {ch: 0 for ch in [0, *self.lanes]}
+        self._busy = {ch: False for ch in [0, *self.lanes]}
         self._jam_next = False
         self._pc_hb = None
         self._pc_hb_changed = 0.0
-        self._busy = False
         self._sim_estop_reg = 0
         self._sim_hand_reg = 0
 
@@ -91,20 +100,29 @@ class PLCSimulator:
     def _set(self, addr: int, value: int) -> None:
         self._hr.setValues(addr + 1, [int(value) & 0xFFFF])
 
-    def _set_r(self, reg: ReadReg, value: int) -> None:
-        self._set(self.rb + reg, value)
-
     # ---------- public test hooks ----------
 
-    def insert_bottle(self) -> bool:
-        if self.sensors & Sensor.INLET_DOOR_CLOSED or self.sensors & Sensor.BOTTLE_AT_INLET:
-            log.info("[SIM] cannot insert bottle: inlet closed or occupied")
-            return False
-        self.sensors |= Sensor.BOTTLE_AT_INLET
-        log.info("[SIM] bottle inserted")
+    def free_lane(self) -> int | None:
+        for lane in self.lanes:
+            ls = self.lane_sensors[lane]
+            if not ls & (S.INLET_DOOR_CLOSED | S.BOTTLE_AT_INLET | S.BOTTLE_IN_SCAN_POSITION | S.BOTTLE_IN_HOLD):
+                return lane
+        return None
+
+    def insert_bottle(self, lane: int | None = None) -> int | None:
+        """Put a bottle in an inlet (default: first free one). Returns the lane or None."""
+        lane = lane or self.free_lane()
+        if lane is None or lane not in self.lanes:
+            log.info("[SIM] cannot insert bottle: no free inlet")
+            return None
+        if self.lane_sensors[lane] & (S.INLET_DOOR_CLOSED | S.BOTTLE_AT_INLET):
+            log.info("[SIM] cannot insert bottle: inlet %s closed or occupied", lane)
+            return None
+        self.lane_sensors[lane] |= S.BOTTLE_AT_INLET
+        log.info("[SIM] bottle inserted in lane %s", lane)
         if self.on_insert:
-            self.on_insert()
-        return True
+            self.on_insert(lane)
+        return lane
 
     def set_estop(self, pressed: bool) -> None:
         if pressed:
@@ -115,11 +133,11 @@ class PLCSimulator:
             if self.state == PlcState.ESTOP:
                 self.state = PlcState.FAULT  # needs RESET_FAULT
 
-    def set_hand_detected(self, present: bool) -> None:
-        if present:
-            self.sensors |= Sensor.HAND_DETECTED
-        else:
-            self.sensors &= ~Sensor.HAND_DETECTED
+    def set_hand_detected(self, present: bool, lane: int = 1) -> None:
+        for ln in self.lanes:
+            self.lane_sensors[ln] &= ~S.HAND_DETECTED
+        if present and lane in self.lanes:
+            self.lane_sensors[lane] |= S.HAND_DETECTED
 
     def jam_next(self) -> None:
         self._jam_next = True
@@ -132,7 +150,7 @@ class PLCSimulator:
         self._tasks.append(asyncio.create_task(self._logic_loop(), name="sim-logic"))
         if self.auto_insert_every_s:
             self._tasks.append(asyncio.create_task(self._auto_insert_loop(), name="sim-auto"))
-        log.info("[SIM] PLC simulator listening on %s:%s", self.host, self.port)
+        log.info("[SIM] PLC simulator listening on %s:%s with %s lanes", self.host, self.port, len(self.lanes))
 
     async def stop(self) -> None:
         for t in self._tasks:
@@ -150,15 +168,17 @@ class PLCSimulator:
         heartbeat = 0
         await self._sleep(1.0)  # boot time
         self.state = PlcState.READY
-        self.sensors |= Sensor.INLET_DOOR_CLOSED
+        for lane in self.lanes:
+            self.lane_sensors[lane] |= S.INLET_DOOR_CLOSED
         while True:
             now = loop.time()
             heartbeat = (heartbeat + 1) % 65536
 
             # Simulation control registers
-            if self._get(SIM_INSERT):
+            ins = self._get(SIM_INSERT)
+            if ins:
                 self._set(SIM_INSERT, 0)
-                self.insert_bottle()
+                self.insert_bottle(ins if ins in self.lanes else None)
             if self._get(SIM_JAM_NEXT):
                 self._set(SIM_JAM_NEXT, 0)
                 self.jam_next()
@@ -169,7 +189,7 @@ class PLCSimulator:
                 self.set_estop(bool(estop))
             if hand != self._sim_hand_reg:
                 self._sim_hand_reg = hand
-                self.set_hand_detected(bool(hand))
+                self.set_hand_detected(bool(hand), hand or 1)
 
             # PC watchdog: only armed once the PC has sent a heartbeat
             pc_hb = self._get(self.wb + WriteReg.PC_HEARTBEAT)
@@ -182,118 +202,139 @@ class PLCSimulator:
             ):
                 log.warning("[SIM] PC heartbeat lost -> FAULT")
                 self.state, self.fault = PlcState.FAULT, FaultCode.PC_WATCHDOG
-                self.sensors |= Sensor.INLET_DOOR_CLOSED
+                for lane in self.lanes:
+                    self.lane_sensors[lane] |= S.INLET_DOOR_CLOSED
 
-            # New command?
-            seq = self._get(self.wb + WriteReg.CMD_SEQ)
-            if seq != 0 and seq != self._last_seq and not self._busy:
-                self._last_seq = seq
-                cmd_val = self._get(self.wb + WriteReg.CMD_CODE)
-                param = self._get(self.wb + WriteReg.CMD_PARAM)
-                self._set_r(ReadReg.CMD_ACK_SEQ, seq)
-                self._set_r(ReadReg.CMD_STATUS, CmdStatus.RUNNING)
-                self._busy = True
-                asyncio.create_task(self._execute(cmd_val, param))
+            # New commands, one per channel
+            for ch in [0, *self.lanes]:
+                base = self.wb + cmd_base(ch)
+                seq = self._get(base + CmdReg.SEQ)
+                if seq != 0 and seq != self._last_seq[ch] and not self._busy[ch]:
+                    self._last_seq[ch] = seq
+                    code = self._get(base + CmdReg.CODE)
+                    param = self._get(base + CmdReg.PARAM)
+                    self._set_ch(ch, ack=seq, status=CmdStatus.RUNNING)
+                    self._busy[ch] = True
+                    asyncio.create_task(self._execute(ch, code, param))
 
             self._publish(heartbeat)
             await asyncio.sleep(0.05)
 
+    def _set_ch(self, ch: int, ack: int | None = None, status: CmdStatus | None = None,
+                result: CmdResult | None = None) -> None:
+        if ch == 0:
+            regs = (ReadReg.CMD_ACK_SEQ, ReadReg.CMD_STATUS, ReadReg.CMD_RESULT)
+            base = self.rb
+        else:
+            regs = (LaneReg.ACK_SEQ, LaneReg.STATUS, LaneReg.RESULT)
+            base = self.rb + lane_base(ch)
+        for reg, val in zip(regs, (ack, status, result)):
+            if val is not None:
+                self._set(base + reg, val)
+
     def _publish(self, heartbeat: int) -> None:
-        self._set_r(ReadReg.PLC_HEARTBEAT, heartbeat)
+        self._set(self.rb + ReadReg.PLC_HEARTBEAT, heartbeat)
         self._publish_io()
 
     def _publish_io(self) -> None:
         if self.bin_count >= BIN_CAPACITY:
             self.sensors |= Sensor.BIN_FULL
-        self._set_r(ReadReg.PLC_STATE, self.state)
-        self._set_r(ReadReg.SENSORS, int(self.sensors))
-        self._set_r(ReadReg.FAULT_CODE, self.fault)
-        self._set_r(ReadReg.BIN_COUNT, self.bin_count)
-        self._set_r(ReadReg.BIN_FILL_PCT, min(100, self.bin_count * 100 // BIN_CAPACITY))
-        self._set_r(ReadReg.PLC_VERSION, 100)
+        self._set(self.rb + ReadReg.PLC_STATE, self.state)
+        self._set(self.rb + ReadReg.SENSORS, int(self.sensors))
+        self._set(self.rb + ReadReg.FAULT_CODE, self.fault)
+        self._set(self.rb + ReadReg.BIN_COUNT, self.bin_count)
+        self._set(self.rb + ReadReg.BIN_FILL_PCT, min(100, self.bin_count * 100 // BIN_CAPACITY))
+        self._set(self.rb + ReadReg.PLC_VERSION, 200)
+        for lane in self.lanes:
+            self._set(self.rb + lane_base(lane) + LaneReg.SENSORS, int(self.lane_sensors[lane]))
 
-    def _finish(self, result: CmdResult) -> None:
+    def _finish(self, ch: int, result: CmdResult) -> None:
         # Sensors/state must be visible no later than the DONE status (spec rule)
         self._publish_io()
-        self._set_r(ReadReg.CMD_RESULT, result)
-        self._set_r(ReadReg.CMD_STATUS, CmdStatus.DONE if result == CmdResult.OK else CmdStatus.FAILED)
-        self._busy = False
+        self._set_ch(ch, result=result, status=CmdStatus.DONE if result == CmdResult.OK else CmdStatus.FAILED)
+        self._busy[ch] = False
 
-    async def _execute(self, cmd_val: int, param: int) -> None:
+    async def _execute(self, ch: int, code: int, param: int) -> None:
         try:
-            cmd = Cmd(cmd_val)
+            cmd = Cmd(code)
         except ValueError:
-            self._finish(CmdResult.INVALID_CMD)
+            self._finish(ch, CmdResult.INVALID_CMD)
+            return
+        if (ch == 0) != (cmd in MACHINE_CMDS):
+            self._finish(ch, CmdResult.INVALID_CMD)
             return
 
         if cmd == Cmd.RESET_FAULT:
             await self._sleep(DURATIONS[cmd])
             if self.sensors & Sensor.ESTOP_ACTIVE:
-                self._finish(CmdResult.INTERLOCK)
+                self._finish(ch, CmdResult.INTERLOCK)
                 return
             self.state, self.fault = PlcState.READY, FaultCode.NONE
-            self._finish(CmdResult.OK)
+            self._finish(ch, CmdResult.OK)
             return
 
         if self.state not in (PlcState.READY, PlcState.BUSY):
-            self._finish(CmdResult.INTERLOCK)
+            self._finish(ch, CmdResult.INTERLOCK)
             return
 
         self.state = PlcState.BUSY
         await self._sleep(DURATIONS.get(cmd, 0.1))
         if self.state != PlcState.BUSY:  # e-stop / fault while moving
-            self._finish(CmdResult.INTERLOCK)
+            self._finish(ch, CmdResult.INTERLOCK)
             return
-        result = self._apply_command(cmd)
-        if self.state == PlcState.BUSY:
+        result = self._apply_command(ch, cmd)
+        if self.state == PlcState.BUSY and not any(self._busy[c] for c in self._busy if c != ch):
             self.state = PlcState.READY
-        self._finish(result)
+        self._finish(ch, result)
 
-    def _apply_command(self, cmd: Cmd) -> CmdResult:
-        s = Sensor
+    def _apply_command(self, lane: int, cmd: Cmd) -> CmdResult:
+        if cmd == Cmd.SAFE_STOP:
+            for ln in self.lanes:
+                self.lane_sensors[ln] |= S.INLET_DOOR_CLOSED
+            return CmdResult.OK
+        ls = self.lane_sensors[lane]
         if cmd in MOTION_CMDS and self._jam_next:
             self._jam_next = False
             self.state, self.fault = PlcState.FAULT, FaultCode.JAM
             return CmdResult.JAM
 
         if cmd == Cmd.OPEN_INLET:
-            self.sensors &= ~s.INLET_DOOR_CLOSED
+            ls &= ~S.INLET_DOOR_CLOSED
         elif cmd == Cmd.CLOSE_INLET:
-            if self.sensors & s.HAND_DETECTED:
+            if ls & S.HAND_DETECTED:
                 return CmdResult.INTERLOCK
-            self.sensors |= s.INLET_DOOR_CLOSED
+            ls |= S.INLET_DOOR_CLOSED
         elif cmd == Cmd.MOVE_TO_SCAN:
-            if not self.sensors & s.BOTTLE_AT_INLET:
+            if not ls & S.BOTTLE_AT_INLET:
                 return CmdResult.NO_BOTTLE
-            if not self.sensors & s.INLET_DOOR_CLOSED:
+            if not ls & S.INLET_DOOR_CLOSED:
                 return CmdResult.INTERLOCK
-            self.sensors = (self.sensors & ~s.BOTTLE_AT_INLET) | s.BOTTLE_IN_SCAN_POSITION
+            ls = (ls & ~S.BOTTLE_AT_INLET) | S.BOTTLE_IN_SCAN_POSITION
         elif cmd == Cmd.ROTATE_BOTTLE:
-            if not self.sensors & s.BOTTLE_IN_SCAN_POSITION:
+            if not ls & S.BOTTLE_IN_SCAN_POSITION:
                 return CmdResult.NO_BOTTLE
         elif cmd == Cmd.MOVE_TO_HOLD:
-            if not self.sensors & s.BOTTLE_IN_SCAN_POSITION:
+            if not ls & S.BOTTLE_IN_SCAN_POSITION:
                 return CmdResult.NO_BOTTLE
-            self.sensors = (self.sensors & ~s.BOTTLE_IN_SCAN_POSITION) | s.BOTTLE_IN_HOLD
+            ls = (ls & ~S.BOTTLE_IN_SCAN_POSITION) | S.BOTTLE_IN_HOLD
         elif cmd == Cmd.ACCEPT_BOTTLE:
-            if not self.sensors & (s.BOTTLE_IN_SCAN_POSITION | s.BOTTLE_IN_HOLD):
+            if not ls & (S.BOTTLE_IN_SCAN_POSITION | S.BOTTLE_IN_HOLD):
                 return CmdResult.NO_BOTTLE
-            self.sensors &= ~(s.BOTTLE_IN_SCAN_POSITION | s.BOTTLE_IN_HOLD)
+            ls &= ~(S.BOTTLE_IN_SCAN_POSITION | S.BOTTLE_IN_HOLD)
             self.bin_count += 1
         elif cmd == Cmd.REJECT_BOTTLE:
-            if not self.sensors & (s.BOTTLE_IN_SCAN_POSITION | s.BOTTLE_IN_HOLD | s.BOTTLE_AT_INLET):
+            if not ls & (S.BOTTLE_IN_SCAN_POSITION | S.BOTTLE_IN_HOLD | S.BOTTLE_AT_INLET):
                 return CmdResult.NO_BOTTLE
-            self.sensors &= ~(s.BOTTLE_IN_SCAN_POSITION | s.BOTTLE_IN_HOLD | s.INLET_DOOR_CLOSED)
-            self.sensors |= s.BOTTLE_AT_INLET
-            asyncio.create_task(self._customer_takes_bottle())
-        elif cmd == Cmd.SAFE_STOP:
-            self.sensors |= s.INLET_DOOR_CLOSED
+            ls &= ~(S.BOTTLE_IN_SCAN_POSITION | S.BOTTLE_IN_HOLD | S.INLET_DOOR_CLOSED)
+            ls |= S.BOTTLE_AT_INLET
+            asyncio.create_task(self._customer_takes_bottle(lane))
+        self.lane_sensors[lane] = ls
         return CmdResult.OK
 
-    async def _customer_takes_bottle(self) -> None:
+    async def _customer_takes_bottle(self, lane: int) -> None:
         await self._sleep(CUSTOMER_PICKUP_S)
-        self.sensors &= ~Sensor.BOTTLE_AT_INLET
-        log.info("[SIM] customer took back the returned bottle")
+        self.lane_sensors[lane] &= ~S.BOTTLE_AT_INLET
+        log.info("[SIM] customer took back the returned bottle from lane %s", lane)
 
     async def _auto_insert_loop(self) -> None:
         while True:
@@ -306,10 +347,11 @@ async def _main() -> None:
     p = argparse.ArgumentParser(description="RVM PLC simulator")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=5020)
+    p.add_argument("--lanes", type=int, default=3)
     p.add_argument("--auto-insert", type=float, default=None, help="insert a bottle every N seconds")
     p.add_argument("--time-scale", type=float, default=1.0)
     a = p.parse_args()
-    sim = PLCSimulator(a.host, a.port, time_scale=a.time_scale, auto_insert_every_s=a.auto_insert)
+    sim = PLCSimulator(a.host, a.port, time_scale=a.time_scale, auto_insert_every_s=a.auto_insert, lanes=a.lanes)
     await sim.start()
     try:
         await asyncio.Event().wait()
