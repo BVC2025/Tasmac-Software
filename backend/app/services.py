@@ -66,22 +66,24 @@ def mask(kind: str, value: str) -> str:
 async def get_or_create_session(db: AsyncSession, machine: Machine, session_id: str) -> RvmSession:
     s = await db.get(RvmSession, session_id)
     if s is None:
-        s = RvmSession(id=session_id, machine_id=machine.id)
-        db.add(s)
-        await db.flush()
-    elif s.machine_id != machine.id:
+        # The lanes of a batch call in parallel: create race-free
+        await db.execute(pg_insert(RvmSession).values(id=session_id, machine_id=machine.id)
+                         .on_conflict_do_nothing(index_elements=["id"]))
+        s = await db.get(RvmSession, session_id)
+    if s.machine_id != machine.id:
         raise DomainError("SESSION_BELONGS_TO_OTHER_MACHINE", 403)
     return s
 
 
 async def _bottle(db: AsyncSession, s: RvmSession, lane: int) -> SessionBottle:
     """The session's bottle in a lane (created on first use)."""
-    res = await db.execute(select(SessionBottle).where(SessionBottle.session_id == s.id, SessionBottle.lane == lane))
-    b = res.scalar_one_or_none()
+    q = select(SessionBottle).where(SessionBottle.session_id == s.id, SessionBottle.lane == lane)
+    b = (await db.execute(q)).scalar_one_or_none()
     if b is None:
-        b = SessionBottle(session_id=s.id, machine_id=s.machine_id, lane=lane, status=BottleState.CHECKING)
-        db.add(b)
-        await db.flush()
+        await db.execute(pg_insert(SessionBottle).values(
+            session_id=s.id, machine_id=s.machine_id, lane=lane, status=BottleState.CHECKING,
+        ).on_conflict_do_nothing(constraint="uq_session_bottle_lane"))
+        b = (await db.execute(q)).scalar_one()
     return b
 
 

@@ -7,6 +7,7 @@ import { normalizeMobile } from '../lib/upi'
 import { useVoice } from '../voice'
 import type { MachineView, SessionResult } from '../useMachine'
 import { KeypadInput, SmsMobileStep } from './KeypadInput'
+import { BatchSummary, rupees as toRupees } from './StatusScreens'
 import { QrScan } from './QrScan'
 import { VoiceInput } from './VoiceInput'
 
@@ -53,7 +54,7 @@ export function RefundMethod({ view }: { view: MachineView }) {
   }
 
   const header: Record<Step, string> = {
-    choose: t.chooseTitle,
+    choose: t.chooseTitle(toRupees(view.stateData.amount_paise ?? 1000)),
     qr: t.qrTitle,
     voice: t.voiceTitle,
     keypad: t.keypadTitle,
@@ -94,13 +95,18 @@ export function RefundMethod({ view }: { view: MachineView }) {
           </Button>
         ) : (
           <span className="rounded-full bg-brand-50 px-4 py-1.5 text-lg font-semibold text-brand-700 ring-1 ring-brand-100">
-            {t.eligible}
+            {t.eligible(view.stateData.bottle_count ?? 1, toRupees(view.stateData.amount_paise ?? 1000))}
           </span>
         )}
         <Countdown seconds={view.stateData.timeout_s} since={view.stateAt} />
       </div>
 
       <Title>{header[step]}</Title>
+      {step === 'choose' && Object.keys(view.lanes).length > 1 && (
+        <div className="-mt-4 mb-6 w-full">
+          <BatchSummary lanes={Object.values(view.lanes).sort((x, y) => x.lane - y.lane)} />
+        </div>
+      )}
 
       {attempt > 1 && view.inputError && (
         <div className="mb-6 w-full">
@@ -167,6 +173,7 @@ export function Confirm({ view }: { view: MachineView }) {
           <p className="text-7xl font-extrabold">₹{rupees}</p>
         </div>
         <dl className="divide-y divide-slate-100 text-xl">
+          {c.bottle_count > 1 && <Row label={t.bottleCount} value={String(c.bottle_count)} />}
           <Row label={t.sendTo} value={c.destination} />
           {c.name && <Row label={t.accountName} value={c.name} />}
           {c.sms_mobile && <Row label={t.smsTo} value={c.sms_mobile} icon={<SmsIcon className="h-5 w-5" />} />}
@@ -177,7 +184,7 @@ export function Confirm({ view }: { view: MachineView }) {
           {t.change}
         </Button>
         <Button className="col-span-2" disabled={busy} onClick={() => send(true)}>
-          <CheckIcon className="h-7 w-7" strokeWidth={3} /> {t.confirm}
+          <CheckIcon className="h-7 w-7" strokeWidth={3} /> {t.confirm(rupees)}
         </Button>
       </div>
     </Screen>
@@ -208,7 +215,17 @@ export function Result({ result, onDone }: { result: SessionResult; onDone: () =
           <div className={`mb-8 flex h-40 w-40 items-center justify-center rounded-full ${success ? 'bg-brand-600' : 'bg-amber-500'} text-white shadow-lg`}>
             {success ? <CheckIcon className="h-24 w-24" strokeWidth={3} /> : <ClockIcon className="h-24 w-24" />}
           </div>
-          <Title sub={success ? t.successSub : t.pendingSub}>{success ? t.successTitle : t.pendingTitle}</Title>
+          <Title sub={success ? t.successSub : t.pendingSub(toRupees(result.amount_paise || 1000))}>
+            {success ? t.successTitle(toRupees(result.amount_paise || 1000)) : t.pendingTitle}
+          </Title>
+          {result.bottles.length > 1 && (
+            <div className="mb-4 w-full space-y-3 text-center">
+              <p className="text-xl font-semibold text-slate-700">
+                {t.resultCounts(result.accepted, result.bottles.length - result.accepted)}
+              </p>
+              <BatchSummary lanes={result.bottles} />
+            </div>
+          )}
           {result.sms && (
             <p className="flex items-center gap-2 text-xl text-slate-600">
               <SmsIcon className="h-6 w-6" /> {t.smsNote}

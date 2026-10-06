@@ -6,7 +6,7 @@ import { LangProvider, useLang } from './i18n'
 import { Confirm, RefundMethod, Result } from './screens/RefundFlow'
 import { Checking, Connecting, isCheckingState, OutOfService, Paying, Ready, Rejecting, Starting } from './screens/StatusScreens'
 import { useMachine, type MachineView } from './useMachine'
-import { cueFor, useVoice, VoiceProvider } from './voice'
+import { cueFor, rejectClip, useVoice, VoiceProvider } from './voice'
 
 function VoiceToggle() {
   const { enabled, available, blocked, toggle } = useVoice()
@@ -62,12 +62,13 @@ function Body({ view, clearResult }: { view: MachineView; clearResult: () => voi
   // Hold the outcome screen for a few seconds after the session ends
   if (view.result && (s === 'READY' || s === 'REJECTING')) return <Result result={view.result} onDone={clearResult} />
   if (s === 'STARTING' || s === 'HEALTH_CHECK') return <Starting />
-  if (s === 'READY') return <Ready />
+  if (s === 'READY') return <Ready lanes={view.laneCount} />
   if (isCheckingState(s)) return <Checking view={view} />
   if (s === 'SELECT_REFUND_METHOD') return <RefundMethod key={view.stateAt} view={view} />
   if (s === 'CONFIRMING') return <Confirm key={view.stateAt} view={view} />
-  if (s === 'PAYING' || s === 'ACCEPTING') return <Paying />
-  if (s === 'REJECTING') return <Rejecting reason={view.stateData.reason} />
+  if (s === 'PAYING' || s === 'ACCEPTING') return <Paying amountPaise={view.stateData.amount_paise ?? view.confirm?.amount_paise} />
+  if (s === 'REJECTING')
+    return <Rejecting reason={view.stateData.reason} lanes={Object.values(view.lanes).sort((a, b) => a.lane - b.lane)} />
   return <Starting />
 }
 
@@ -94,12 +95,27 @@ function Kiosk() {
   const cue = cueFor(view)
   const cueKey = cue?.key
   const cueClip = cue?.clip
+  const cueQueue = cue?.queue
   useEffect(() => {
     if (!cueClip) return
-    const t = window.setTimeout(() => voice.play(cueClip), 60)
+    const t = window.setTimeout(() => voice.play(cueClip, { queue: cueQueue }), 60)
     return () => window.clearTimeout(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cueKey])
+
+  // Each rejected bottle of a batch is announced with its reason, one after another
+  const spokenRejects = useRef(new Set<number>())
+  useEffect(() => {
+    const lanes = Object.values(view.lanes)
+    if (!lanes.length) spokenRejects.current.clear()
+    for (const l of lanes) {
+      if (l.step === 'REJECTED' && !spokenRejects.current.has(l.lane)) {
+        spokenRejects.current.add(l.lane)
+        voice.play(rejectClip(l.reason), { queue: true })
+      }
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view.lanes])
 
   return (
     <div className="flex h-full flex-col">

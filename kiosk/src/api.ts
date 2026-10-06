@@ -36,7 +36,10 @@ export const api = {
   confirm: (ok: boolean) => request('POST', '/api/customer/confirm', { ok }),
   sessions: () => request<SessionRow[]>('GET', '/api/sessions?limit=15'),
   simBottles: () => request<SimBottle[]>('GET', '/api/sim/bottles'),
-  simInsert: (bottle?: string) => request<{ inserted: boolean; bottle: string | null }>('POST', '/api/sim/insert', { bottle }),
+  simInsert: (bottle?: string, lane?: number) =>
+    request<{ inserted: boolean; lane: number | null; bottle: string | null }>('POST', '/api/sim/insert', { bottle, lane }),
+  simInsertBatch: (bottles: (string | null)[]) =>
+    request<{ inserted: { lane: number; bottle: string | null }[] }>('POST', '/api/sim/insert-batch', { bottles }),
   simRefresh: () => request<{ refreshed: number }>('POST', '/api/sim/refresh'),
   simEstop: (pressed: boolean) => request('POST', '/api/sim/estop', { pressed }),
 }
@@ -58,4 +61,7 @@ export interface SessionRow {
   destination: string | null
   txn_id: string | null
   payout_status: string | null
+  bottles: { lane: number; step: string; reason: string }[]
+  accepted: number
+  amount_paise: number
 }

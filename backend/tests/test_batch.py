@@ -99,3 +99,17 @@ async def test_stats_and_report_count_bottles(machine, client, viewer_h):
     assert [(b["lane"], b["status"]) for b in sess["bottles"]] == [(1, "ACCEPTED"), (2, "REJECTED"), (3, "ACCEPTED")]
     t = (await client.get("/api/admin/v1/transactions", headers=viewer_h)).json()[0]
     assert t["bottle_count"] == 2
+
+
+async def test_lanes_call_in_parallel_on_a_new_session(machine):
+    """All lanes of a batch hit the server at the same moment for a session it has never seen."""
+    import asyncio
+
+    raws = [refund_qr() for _ in range(3)]
+    results = await asyncio.gather(*(machine.post("/sessions/fresh/refund-qr", {"raw": r, "lane": ln})
+                                     for ln, r in enumerate(raws, start=1)))
+    assert [r.status_code for r in results] == [200, 200, 200]
+    assert all(r.json()["ok"] for r in results)
+    reserves = await asyncio.gather(*(reserve(machine, "fresh", ln, refund=r) for ln, r in enumerate(raws, start=1)))
+    assert all(v["ok"] for v in reserves)
+    assert sorted(await bottles("fresh")) == [1, 2, 3]

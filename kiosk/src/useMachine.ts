@@ -3,10 +3,20 @@ import { MACHINE_WS } from './api'
 
 export type Ev = { type: string; at?: string; [k: string]: any }
 
+export interface LaneView {
+  lane: number
+  step: string // DETECTED .. VERIFYING | VALID | REJECTED | ACCEPTED | RETURNED
+  reason?: string | null
+  amount_paise?: number
+}
+
 export interface SessionResult {
   outcome: string // ACCEPTED | RETURNED | CANCELLED | ABORTED
   reason: string
   txn_id: string | null
+  amount_paise: number
+  accepted: number
+  bottles: LaneView[]
   final: Ev | null // REFUND_SUCCESS / REFUND_PENDING message
   sms: boolean // an SMS receipt will be sent
   at: number
@@ -21,6 +31,8 @@ export interface MachineView {
   machineId: string
   simulation: boolean
   plc: { connected: boolean; state: string; fault: string; bin_fill_pct: number } | null
+  laneCount: number
+  lanes: Record<number, LaneView> // bottles of the current session, by inlet
   confirm: Ev | null // CONFIRM_REFUND details
   inputError: string | null // last destination error code
   final: Ev | null
@@ -37,6 +49,8 @@ const initial: MachineView = {
   machineId: '',
   simulation: false,
   plc: null,
+  laneCount: 1,
+  lanes: {},
   confirm: null,
   inputError: null,
   final: null,
@@ -59,15 +73,13 @@ function reducer(s: MachineView, a: Action): MachineView {
         stateAt: Date.now(),
         message: ev.last_message ?? null,
         machineId: ev.machine_id,
+        laneCount: ev.lane_count ?? 1,
+        lanes: Object.fromEntries(((ev.lanes ?? []) as LaneView[]).map((l) => [l.lane, l])),
         simulation: ev.simulation,
         plc: ev.plc,
       }
     case 'state': {
       const next = { ...s, state: ev.state, stateData: ev, stateAt: Date.now() }
-      if (ev.state === 'BOTTLE_DETECTED') {
-        // new customer session: forget everything from the previous one
-        Object.assign(next, { confirm: null, inputError: null, final: null, result: null, fault: null })
-      }
       if (ev.state === 'READY') next.fault = null
       return next
     }
@@ -78,10 +90,18 @@ function reducer(s: MachineView, a: Action): MachineView {
       if (ev.code === 'REFUND_SUCCESS' || ev.code === 'REFUND_PENDING') next.final = ev
       return next
     }
+    case 'session_started':
+      // new customer session: forget everything from the previous one
+      return { ...s, lanes: {}, confirm: null, inputError: null, final: null, result: null, fault: null }
+    case 'lane':
+      return { ...s, lanes: { ...s.lanes, [ev.lane]: { lane: ev.lane, step: ev.step, reason: ev.reason, amount_paise: ev.amount_paise } } }
     case 'session_ended':
       return {
         ...s,
-        result: { outcome: ev.outcome, reason: ev.reason, txn_id: ev.txn_id, final: s.final, sms: !!s.confirm?.sms, at: Date.now() },
+        result: {
+          outcome: ev.outcome, reason: ev.reason, txn_id: ev.txn_id, final: s.final, sms: !!s.confirm?.sms,
+          amount_paise: ev.amount_paise ?? 0, accepted: ev.accepted ?? 0, bottles: ev.bottles ?? [], at: Date.now(),
+        },
       }
     case 'fault':
       return { ...s, fault: ev.reason }

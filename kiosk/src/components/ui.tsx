@@ -25,8 +25,12 @@ export function Button({
   )
 }
 
-export function Screen({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`mx-auto flex w-full max-w-3xl flex-1 flex-col items-center px-6 py-8 ${className}`}>{children}</div>
+export function Screen({ children, className = '', wide = false }: { children: ReactNode; className?: string; wide?: boolean }) {
+  return (
+    <div className={`mx-auto flex w-full ${wide ? 'max-w-5xl' : 'max-w-3xl'} flex-1 flex-col items-center px-6 py-8 ${className}`}>
+      {children}
+    </div>
+  )
 }
 
 export function Title({ children, sub }: { children: ReactNode; sub?: ReactNode }) {
@@ -51,7 +55,8 @@ export function Countdown({ seconds, since }: { seconds?: number; since: number 
   const urgent = left <= 15
   const warned = useRef(false)
   useEffect(() => {
-    if (seconds && urgent && left > 0 && !warned.current) {
+    // only for real customer-input timers, not the few-second batch window
+    if (seconds && seconds > 30 && urgent && left > 0 && !warned.current) {
       warned.current = true
       play('hurry')
     }

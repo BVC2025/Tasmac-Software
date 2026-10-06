@@ -15,6 +15,9 @@ export function DevPanel({ view }: { view: MachineView }) {
   const [voice, setVoice] = useState(SAMPLE_VOICE)
   const [note, setNote] = useState('')
   const [estop, setEstop] = useState(false)
+  const [lane, setLane] = useState<number | undefined>(undefined)
+  const [batch, setBatch] = useState<string[]>(['happy-path-upi', 'damaged-bottle', 'happy-path-mobile'])
+  const laneNumbers = Array.from({ length: view.laneCount }, (_, i) => i + 1)
 
   useEffect(() => {
     if (!open) return
@@ -27,8 +30,17 @@ export function DevPanel({ view }: { view: MachineView }) {
 
   const insert = async (name?: string) => {
     try {
-      const r = await api.simInsert(name)
-      setNote(r.inserted ? `Inserted: ${r.bottle}` : 'Not inserted (inlet closed or busy)')
+      const r = await api.simInsert(name, lane)
+      setNote(r.inserted ? `Inserted ${r.bottle} in inlet ${r.lane}` : 'Not inserted (inlet closed or busy)')
+    } catch (e) {
+      setNote((e as Error).message)
+    }
+  }
+
+  const insertBatch = async () => {
+    try {
+      const r = await api.simInsertBatch(batch.slice(0, view.laneCount).map((b) => b || null))
+      setNote(r.inserted.length ? `Inserted together: ${r.inserted.map((i) => `${i.lane}=${i.bottle}`).join(', ')}` : 'Not inserted (inlets busy)')
     } catch (e) {
       setNote((e as Error).message)
     }
@@ -65,7 +77,39 @@ export function DevPanel({ view }: { view: MachineView }) {
       </section>
 
       <section className="space-y-2">
-        <h3 className="font-semibold text-slate-400">1. Insert test bottle</h3>
+        <h3 className="font-semibold text-slate-400">1. Insert test bottles</h3>
+        {view.laneCount > 1 && (
+          <div className="space-y-2 rounded-lg bg-slate-800/60 p-2">
+            <p className="text-xs font-semibold text-emerald-300">Several bottles at the same moment (one per inlet)</p>
+            {laneNumbers.map((ln, i) => (
+              <label key={ln} className="flex items-center gap-2 text-xs">
+                <span className="w-14 shrink-0 text-slate-400">Inlet {ln}</span>
+                <select
+                  className={input}
+                  value={batch[i] ?? ''}
+                  onChange={(e) => setBatch((prev) => Object.assign([...prev], { [i]: e.target.value }))}
+                >
+                  <option value="">(empty)</option>
+                  {bottles.map((b) => (
+                    <option key={b.name} value={b.name}>{b.name}</option>
+                  ))}
+                </select>
+              </label>
+            ))}
+            <button className={`${btn} w-full bg-emerald-700 hover:bg-emerald-600`} onClick={insertBatch}>
+              Insert all at once
+            </button>
+          </div>
+        )}
+        <div className="flex items-center gap-1 text-xs">
+          <span className="mr-1 text-slate-400">Single bottle into</span>
+          {[undefined, ...laneNumbers].map((ln) => (
+            <button key={ln ?? 'auto'} onClick={() => setLane(ln)}
+              className={`rounded-md px-2 py-1 font-semibold ${lane === ln ? 'bg-amber-400 text-slate-900' : 'bg-slate-700 text-white'}`}>
+              {ln ?? 'auto'}
+            </button>
+          ))}
+        </div>
         <button className={`${btn} w-full bg-emerald-700 hover:bg-emerald-600`} onClick={() => insert()}>
           Insert next bottle
         </button>
@@ -127,6 +171,10 @@ export function DevPanel({ view }: { view: MachineView }) {
         {sessions.map((s) => (
           <div key={s.id} className="rounded-md bg-slate-800 px-2 py-1.5 font-mono text-[11px]">
             <span className={s.outcome === 'ACCEPTED' ? 'text-emerald-300' : 'text-amber-300'}>{s.outcome}</span> {s.reason}
+            {s.outcome === 'ACCEPTED' && <span className="text-emerald-300"> ₹{s.amount_paise / 100}</span>}
+            <span className="block text-slate-300">
+              {s.bottles.map((b) => `#${b.lane} ${b.step}${b.reason && b.step !== 'ACCEPTED' ? ` (${b.reason})` : ''}`).join(' · ')}
+            </span>
             <span className="block text-slate-400">
               {s.txn_id ?? ''} {s.destination ?? ''} {s.payout_status ?? ''}
             </span>

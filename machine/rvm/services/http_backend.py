@@ -138,7 +138,7 @@ class HttpBackend(Backend):
     async def _notify(self, path: str, body: dict) -> None:
         try:
             await self._request("POST", path, body)
-        except (httpx.HTTPError, RETRYABLE) as e:
+        except httpx.HTTPError as e:  # covers transport errors, timeouts and 4xx/5xx
             log.error("Backend notify failed, queued in outbox: %s %s", path, e)
             self.outbox.add(path, body)
 

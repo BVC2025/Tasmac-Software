@@ -21,8 +21,9 @@ interface VoiceCtx {
   available: boolean
   blocked: boolean
   toggle: () => void
-  /** Resolves when the clip ends (or immediately if muted / missing). */
-  play: (id: string) => Promise<void>
+  /** Resolves when the clip ends (or immediately if muted / missing).
+   *  queue: wait for the clip that is playing instead of cutting it off. */
+  play: (id: string, opts?: { queue?: boolean }) => Promise<void>
   stop: () => void
   /** Stop and forget the last clip (so a language reset does not replay it). */
   forget: () => void
@@ -46,8 +47,9 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
   const [enabled, setEnabled] = useState(readPref)
   const [blocked, setBlocked] = useState(false)
   const audio = useRef<HTMLAudioElement | null>(null)
-  const finish = useRef<(() => void) | null>(null)
+  const finish = useRef<((interrupted: boolean) => void) | null>(null)
   const last = useRef<{ id: string; at: number } | null>(null)
+  const queue = useRef<string[]>([])
   const langRef = useRef(lang)
   const enabledRef = useRef(enabled)
   enabledRef.current = enabled
@@ -62,41 +64,65 @@ export function VoiceProvider({ children }: { children: ReactNode }) {
       .catch(() => console.info('[voice] no manifest - run "npm run voice" to generate prompts'))
   }, [])
 
-  const stop = useCallback(() => {
+  const halt = useCallback(() => {
+    const f = finish.current
+    finish.current = null
     audio.current?.pause()
     audio.current = null
-    finish.current?.()
-    finish.current = null
+    f?.(true) // interrupted: settle its promise, but do not start the queue
   }, [])
+
+  const stop = useCallback(() => {
+    queue.current = []
+    halt()
+  }, [halt])
 
   const playIn = useCallback(
     (id: string, l: 'ta' | 'en'): Promise<void> => {
-      stop()
+      halt()
       last.current = { id, at: Date.now() }
       if (!enabledRef.current || !manifest?.clips[id]?.[l]) return Promise.resolve()
       const a = new Audio(`/voice/${l}/${id}.mp3?v=${manifest.clips[id][l]}`)
       audio.current = a
       return new Promise<void>((resolve) => {
-        const done = () => {
+        let settled = false
+        const done = (interrupted: boolean) => {
+          if (settled) return
+          settled = true
           if (finish.current === done) finish.current = null
           resolve()
+          if (interrupted) return
+          const next = queue.current.shift()
+          if (next) playRef.current?.(next, langRef.current)
         }
         finish.current = done
-        a.onended = done
-        a.onerror = done
+        a.onended = () => done(false)
+        a.onerror = () => done(false)
         a.play().then(
           () => setBlocked(false),
           (err: DOMException) => {
             if (err.name === 'NotAllowedError') setBlocked(true)
-            done()
+            done(false)
           },
         )
       })
     },
-    [manifest, stop],
+    [manifest, halt],
   )
+  const playRef = useRef<typeof playIn | null>(null)
+  playRef.current = playIn
 
-  const play = useCallback((id: string) => playIn(id, langRef.current), [playIn])
+  const play = useCallback(
+    (id: string, opts?: { queue?: boolean }) => {
+      if (opts?.queue && finish.current) {
+        queue.current.push(id)   // something is playing: speak after it
+        return Promise.resolve()
+      }
+      if (!opts?.queue) queue.current = []   // a new instruction supersedes anything still waiting
+      return playIn(id, langRef.current)
+    },
+    [playIn],
+  )
 
   // Replay the current instruction when the customer switches language
   useEffect(() => {
@@ -187,13 +213,13 @@ const INPUT_ERROR_CLIP: Record<string, string> = {
   INVALID_SMS_MOBILE: 'error_invalid_sms_mobile',
 }
 
-const CHECKING = new Set(['BOTTLE_DETECTED', 'POSITIONING', 'INSPECTING', 'SCANNING_REFUND_QR', 'SCANNING_MFG_QR', 'VERIFYING'])
+const CHECKING = new Set(['COLLECTING', 'CHECKING'])
 
 /**
  * Which clip the current machine state calls for. The returned `key` changes
  * only when a new instruction is due, so each instruction plays once.
  */
-export function cueFor(view: MachineView): { key: string; clip: string } | null {
+export function cueFor(view: MachineView): { key: string; clip: string; queue?: boolean } | null {
   const s = view.state
   if (!view.connected) return null
   if (s === 'OUT_OF_SERVICE') return { key: 'oos', clip: 'out_of_service' }
@@ -206,16 +232,22 @@ export function cueFor(view: MachineView): { key: string; clip: string } | null 
   }
   if (s === 'READY') return { key: `ready-${view.stateAt}`, clip: 'insert_bottle' }
   if (CHECKING.has(s)) {
-    if (s === 'BOTTLE_DETECTED' && view.message?.code === 'REMOVE_HAND') return { key: `hand-${view.message.at}`, clip: 'remove_hand' }
+    if (view.message?.code === 'REMOVE_HAND') return { key: `hand-${view.message.at}`, clip: 'remove_hand' }
     return { key: 'checking', clip: 'checking' }
   }
   if (s === 'SELECT_REFUND_METHOD') {
     const attempt = view.stateData.attempt ?? 1
     const err = attempt > 1 && view.inputError ? INPUT_ERROR_CLIP[view.inputError] : null
-    return { key: `method-${view.stateAt}`, clip: err ?? 'choose_method' }
+    // queued: rejected bottles of the batch are announced first
+    return { key: `method-${view.stateAt}`, clip: err ?? 'choose_method', queue: !err }
   }
   if (s === 'CONFIRMING') return { key: `confirm-${view.stateAt}`, clip: 'confirm_refund' }
   if (s === 'PAYING' || s === 'ACCEPTING') return { key: 'paying', clip: 'paying' }
-  if (s === 'REJECTING') return { key: `reject-${view.stateAt}`, clip: rejectClip(view.stateData.reason) }
+  if (s === 'REJECTING') {
+    // every bottle failed its own check: each one was already announced
+    const bottles = (view.stateData.bottles ?? []) as { step: string }[]
+    if (bottles.length && bottles.every((b) => b.step === 'REJECTED')) return null
+    return { key: `reject-${view.stateAt}`, clip: rejectClip(view.stateData.reason), queue: true }
+  }
   return null
 }
