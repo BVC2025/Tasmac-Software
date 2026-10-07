@@ -79,6 +79,7 @@ class CameraConfig(BaseModel):
     height: int = 720
     frame_interval_s: float = 0.35   # pause before each capture so the bottle can turn
     backend: Literal["auto", "dshow", "msmf"] = "auto"
+    rotate: Literal[0, 90, 180, 270] = 0   # degrees clockwise (phone held upright streams sideways)
 
 
 class MachineConfig(BaseModel):

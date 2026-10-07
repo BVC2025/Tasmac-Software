@@ -78,6 +78,18 @@ export function RealQrTest({ lane, input, btn }: { lane?: number; input: string;
     }
   }
 
+  const camLane = String(lane ?? 1)
+  const rotation = cam?.lanes[camLane]?.rotate ?? cam?.lanes['1']?.rotate ?? 0
+  const rotate = async () => {
+    try {
+      const r = await api.cameraRotate(lane ?? 1, (rotation + 90) % 360)
+      setCam((c) => c && { ...c, lanes: Object.fromEntries(Object.entries(c.lanes).map(([k, v]) => [k, { ...v, rotate: r.rotate }])) })
+      setNote(`Picture turned ${r.rotate}°. To keep it after a restart: camera.rotate: ${r.rotate} in machine.camera.yaml`)
+    } catch (e) {
+      setNote((e as Error).message)
+    }
+  }
+
   const insert = async (withCodes: boolean) => {
     try {
       const r = await api.simInsertCustom({
@@ -120,6 +132,9 @@ export function RealQrTest({ lane, input, btn }: { lane?: number; input: string;
               <p className="p-4 text-center text-xs text-slate-400">No picture yet - is DroidCam started?</p>
             )}
           </div>
+          <button className={`${btn} w-full`} onClick={rotate}>
+            Rotate picture ↻ (now {rotation}°)
+          </button>
           {preview?.codes.map((c) => (
             <div key={c.text} className="space-y-0.5 rounded bg-slate-900 p-1.5">
               <KindBadge kind={c.kind} />

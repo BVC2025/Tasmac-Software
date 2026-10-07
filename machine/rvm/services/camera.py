@@ -79,12 +79,17 @@ def decode_bytes(data: bytes) -> list[Code]:
     return codes
 
 
+ROTATIONS = {90: 0, 180: 1, 270: 2} if cv2 is None else {
+    90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
+
+
 class CameraSource:
     """Background reader for one camera / stream; keeps the latest frame."""
 
-    def __init__(self, source: int | str, width: int, height: int, backend: str):
+    def __init__(self, source: int | str, width: int, height: int, backend: str, rotate: int = 0):
         _require()
         self.source = source
+        self.rotate = rotate   # degrees clockwise: a phone held upright still streams landscape
         self.width, self.height, self.backend = width, height, backend
         self._frame = None
         self._frame_at = 0.0
@@ -145,6 +150,8 @@ class CameraSource:
                     self.connected, self.error = False, f"Camera {self.source!r} stopped sending frames"
                     log.warning("%s - reconnecting", self.error)
                     break
+                if self.rotate in ROTATIONS:
+                    frame = cv2.rotate(frame, ROTATIONS[self.rotate])
                 with self._lock:
                     self._frame, self._frame_at = frame, time.monotonic()
                 n += 1
@@ -158,7 +165,7 @@ class OpenCVCamera(Camera):
     """Camera per lane; lanes without their own source share the first one."""
 
     def __init__(self, sources: dict[int, int | str], width: int = 1280, height: int = 720,
-                 frame_interval_s: float = 0.35, backend: str = "auto"):
+                 frame_interval_s: float = 0.35, backend: str = "auto", rotate: int = 0):
         _require()
         if not sources:
             raise ValueError("camera.sources is empty")
@@ -166,7 +173,7 @@ class OpenCVCamera(Camera):
         self.lanes: dict[int, CameraSource] = {}
         for lane, src in sorted(sources.items()):
             if src not in by_source:
-                by_source[src] = CameraSource(src, width, height, backend)
+                by_source[src] = CameraSource(src, width, height, backend, rotate)
             self.lanes[lane] = by_source[src]
         self._default = self.lanes[min(self.lanes)]
         self.sources = list(by_source.values())

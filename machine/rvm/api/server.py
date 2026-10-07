@@ -53,6 +53,10 @@ class SimBatchIn(BaseModel):
     bottles: list[str | None] = Field(default_factory=list, max_length=3)  # one per lane, None = next in feed
 
 
+class RotateIn(BaseModel):
+    degrees: Literal[0, 90, 180, 270]
+
+
 class SimCustomIn(BaseModel):
     refund_qr: str | None = Field(default=None, max_length=512)
     mfg_qr: str | None = Field(default=None, max_length=512)
@@ -249,8 +253,15 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
         if not hasattr(cam, "source"):
             return {"enabled": False, "lanes": {}}
         return {"enabled": True, "lanes": {
-            ln: {"source": str(src.source), "connected": src.connected, "error": src.error, "fps": round(src.fps, 1)}
+            ln: {"source": str(src.source), "connected": src.connected, "error": src.error, "fps": round(src.fps, 1),
+                 "rotate": src.rotate}
             for ln, src in cam.lanes.items()}}
+
+    @app.post("/api/camera/{lane}/rotate")
+    async def camera_rotate(lane: int, body: RotateIn):
+        """Turn the picture (until restart; set camera.rotate in the config to keep it)."""
+        camera_or_404().source(lane).rotate = body.degrees
+        return {"rotate": body.degrees}
 
     @app.get("/api/camera/{lane}/preview")
     async def camera_preview(lane: int, width: int = 640):

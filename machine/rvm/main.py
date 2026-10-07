@@ -43,7 +43,7 @@ def make_vision(cfg: MachineConfig, feed: SimBottleFeed) -> tuple[Camera, QRRead
         from .services.camera import OpenCVCamera, ZxingQRReader
 
         c = cfg.camera
-        return OpenCVCamera(c.sources, c.width, c.height, c.frame_interval_s, c.backend), ZxingQRReader()
+        return OpenCVCamera(c.sources, c.width, c.height, c.frame_interval_s, c.backend, c.rotate), ZxingQRReader()
     return MockCamera(), MockQRReader(feed, cfg.flow.inspection_angles)
 
 

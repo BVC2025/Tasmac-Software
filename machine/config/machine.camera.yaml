@@ -26,6 +26,7 @@ camera:
   width: 1280
   height: 720
   frame_interval_s: 0.35
+  rotate: 0                         # 90 / 180 / 270 if the picture is sideways (phone held upright)
   backend: dshow                    # only for webcam indexes; try "msmf" or "auto" if one does not open
 
 backend_driver: http

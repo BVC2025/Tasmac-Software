@@ -45,6 +45,8 @@ export const api = {
   simInsertCustom: (body: { refund_qr?: string; mfg_qr?: string; condition: string; lane?: number }) =>
     request<{ inserted: boolean; lane: number | null }>('POST', '/api/sim/insert-custom', body),
   cameraStatus: () => request<CameraStatus>('GET', '/api/camera'),
+  cameraRotate: (lane: number, degrees: number) =>
+    request<{ rotate: number }>('POST', `/api/camera/${lane}/rotate`, { degrees }),
   cameraPreview: (lane = 1, width = 640) => request<CameraPreview>('GET', `/api/camera/${lane}/preview?width=${width}`),
   /** Every QR in a photo, decoded on the machine (zxing-cpp reads several codes per image). */
   qrDecode: async (file: Blob): Promise<{ codes: DecodedCode[] }> => {
@@ -70,7 +72,7 @@ export interface DecodedCode {
 
 export interface CameraStatus {
   enabled: boolean
-  lanes: Record<string, { source: string; connected: boolean; error: string | null; fps: number }>
+  lanes: Record<string, { source: string; connected: boolean; error: string | null; fps: number; rotate: number }>
 }
 
 export interface CameraPreview {
