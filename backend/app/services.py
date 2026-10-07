@@ -117,11 +117,15 @@ async def _mfg_consumed(db: AsyncSession, mfg_serial: str) -> bool:
 
 # ---------------- QR parsing: signed test format, then the registry of real QRs ----------------
 
-async def _registered(db: AsyncSession, raw: str, kind: str) -> QrCode | None:
+# registry kinds: refund | mfg (per-bottle manufacturing QR) | product (product barcode, same on every bottle)
+MACHINE_KIND = {"refund": "refund", "mfg": "mfg", "product": "mfg"}
+
+
+async def _registered(db: AsyncSession, raw: str, *kinds: str) -> QrCode | None:
     if not settings.qr_registry_enabled:
         return None
     row = await db.get(QrCode, qr.code_hash(raw))
-    return row if row is not None and row.kind == kind and row.active else None
+    return row if row is not None and row.kind in kinds and row.active else None
 
 
 async def parse_refund(db: AsyncSession, raw: str) -> qr.RefundQR:
@@ -137,9 +141,9 @@ async def parse_mfg(db: AsyncSession, raw: str) -> qr.MfgQR:
     try:
         return qr.parse_mfg(raw, settings.qr_signing_secret)
     except qr.QRError as e:
-        if e.code != "MFG_QR_INVALID_FORMAT" or not (row := await _registered(db, raw, "mfg")):
+        if e.code != "MFG_QR_INVALID_FORMAT" or not (row := await _registered(db, raw, "mfg", "product")):
             raise
-        return qr.MfgQR(brand=row.brand or "", batch=row.batch or "-", serial=row.serial)
+        return qr.MfgQR(brand=row.brand or "", batch=row.batch or "-", serial=row.serial, unique=row.kind == "mfg")
 
 
 async def classify_codes(db: AsyncSession, machine: Machine, codes: list[str],
@@ -154,7 +158,7 @@ async def classify_codes(db: AsyncSession, machine: Machine, codes: list[str],
         kind = qr.classify(raw)
         if kind is None and settings.qr_registry_enabled and not record:
             row = await db.get(QrCode, qr.code_hash(raw))
-            kind = row.kind if row is not None and row.active else None
+            kind = MACHINE_KIND.get(row.kind) if row is not None and row.active else None
         elif kind is None and settings.qr_registry_enabled:
             h = qr.code_hash(raw)
             await db.execute(pg_insert(QrCode).values(
@@ -163,7 +167,7 @@ async def classify_codes(db: AsyncSession, machine: Machine, codes: list[str],
             row = await db.get(QrCode, h, with_for_update=True)
             row.seen_count += 1
             row.last_seen_at, row.last_machine_id = utcnow(), machine.id
-            kind = row.kind if row.active else None
+            kind = MACHINE_KIND.get(row.kind) if row.active else None
         out[raw] = kind
     await db.commit()
     return out
@@ -203,7 +207,7 @@ async def verify_mfg_qr(db: AsyncSession, machine: Machine, session_id: str, raw
         return Verdict(False, e.code)
     b.mfg_serial, b.brand = m.serial, m.brand
     s.mfg_serial, s.brand = s.mfg_serial or m.serial, s.brand or m.brand
-    if await _mfg_consumed(db, m.serial):
+    if m.unique and await _mfg_consumed(db, m.serial):
         _reject(b, "BOTTLE_ALREADY_RETURNED")
         await db.commit()
         return Verdict(False, "BOTTLE_ALREADY_RETURNED")
@@ -230,10 +234,12 @@ async def check_eligibility(db: AsyncSession, machine: Machine, session_id: str,
     brand = await db.get(EligibleBrand, m.brand)
     if brand is None or not brand.active:
         return await _eligibility_rejected(db, machine, session_id, lane, "BRAND_NOT_ELIGIBLE")
-    if await _mfg_consumed(db, m.serial):
+    # a product barcode is on every bottle of the product: the refund QR alone identifies the bottle
+    mfg_key = m.serial if m.unique else f"{m.serial}.{r.serial}"
+    if m.unique and await _mfg_consumed(db, mfg_key):   # product barcode: the refund QR check below decides
         return await _eligibility_rejected(db, machine, session_id, lane, "BOTTLE_ALREADY_RETURNED")
     res = await db.execute(select(RefundClaim.refund_serial).where(
-        RefundClaim.mfg_serial == m.serial, RefundClaim.status == ClaimStatus.RESERVED,
+        RefundClaim.mfg_serial == mfg_key, RefundClaim.status == ClaimStatus.RESERVED,
         (RefundClaim.session_id != session_id) | (RefundClaim.lane != lane),
         RefundClaim.reserved_until > utcnow()))
     if res.first():
@@ -242,7 +248,7 @@ async def check_eligibility(db: AsyncSession, machine: Machine, session_id: str,
     # Reserve the refund QR - insert if new, then lock the row
     until = utcnow() + timedelta(seconds=settings.reservation_ttl_s)
     await db.execute(pg_insert(RefundClaim).values(
-        refund_serial=r.serial, mfg_serial=m.serial, brand=m.brand, status=ClaimStatus.RESERVED,
+        refund_serial=r.serial, mfg_serial=mfg_key, brand=m.brand, status=ClaimStatus.RESERVED,
         session_id=session_id, lane=lane, machine_id=machine.id, reserved_until=until,
     ).on_conflict_do_nothing(index_elements=["refund_serial"]))
     claim = await _claim_for_update(db, r.serial)
@@ -250,7 +256,7 @@ async def check_eligibility(db: AsyncSession, machine: Machine, session_id: str,
     if blocked:
         # nothing was inserted (ON CONFLICT DO NOTHING); record the rejection, release the row lock
         return await _eligibility_rejected(db, machine, session_id, lane, blocked)
-    claim.mfg_serial, claim.brand, claim.status = m.serial, m.brand, ClaimStatus.RESERVED
+    claim.mfg_serial, claim.brand, claim.status = mfg_key, m.brand, ClaimStatus.RESERVED
     claim.session_id, claim.lane, claim.machine_id, claim.reserved_until = session_id, lane, machine.id, until
     b = await _bottle(db, s, lane)
     b.refund_serial, b.mfg_serial, b.brand, b.status, b.reason = r.serial, m.serial, m.brand, BottleState.VALID, None

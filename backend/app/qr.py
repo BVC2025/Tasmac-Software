@@ -24,6 +24,7 @@ class MfgQR:
     brand: str
     batch: str
     serial: str
+    unique: bool = True   # False: a product barcode (EAN), printed on every bottle of the product
 
 
 class QRError(ValueError):

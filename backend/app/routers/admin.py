@@ -383,14 +383,14 @@ async def claims(status: str | None = None, q: str | None = Query(None, max_leng
 
 class QrRegisterIn(BaseModel):
     raw: str = Field(min_length=1, max_length=512)
-    kind: str = Field(pattern="^(refund|mfg)$")
+    kind: str = Field(pattern="^(refund|mfg|product)$")
     brand: str | None = Field(default=None, max_length=16)
     batch: str | None = Field(default=None, max_length=32)
     label: str | None = Field(default=None, max_length=120)
 
 
 class QrUpdateIn(BaseModel):
-    kind: str | None = Field(default=None, pattern="^(refund|mfg)$")
+    kind: str | None = Field(default=None, pattern="^(refund|mfg|product)$")
     brand: str | None = Field(default=None, max_length=16)
     batch: str | None = Field(default=None, max_length=32)
     label: str | None = Field(default=None, max_length=120)
@@ -405,8 +405,8 @@ def _qr_out(r: QrCode) -> dict:
 
 
 async def _check_mfg_brand(db: AsyncSession, kind: str | None, brand: str | None) -> None:
-    if kind == "mfg" and (not brand or await db.get(EligibleBrand, brand) is None):
-        raise HTTPException(422, "Manufacturing QR needs a brand from the brand list")
+    if kind in ("mfg", "product") and (not brand or await db.get(EligibleBrand, brand) is None):
+        raise HTTPException(422, "Manufacturing QR / product barcode needs a brand from the brand list")
 
 
 @router.get("/qr-codes")
@@ -442,8 +442,8 @@ async def register_qr(body: QrRegisterIn, user: AdminUser = Depends(operator), d
         row = QrCode(code_hash=h, raw=raw, serial=qrfmt.registry_serial(raw), seen_count=0)
         db.add(row)
     row.kind, row.active, row.registered_by = body.kind, True, user.username
-    row.brand = brand if body.kind == "mfg" else None
-    row.batch = body.batch if body.kind == "mfg" else None
+    row.brand = brand if body.kind != "refund" else None
+    row.batch = body.batch if body.kind != "refund" else None
     row.label = body.label
     svc.audit(db, _actor(user), "QR_REGISTERED", "qr", row.serial, kind=body.kind, brand=row.brand)
     await db.commit()

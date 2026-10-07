@@ -4,18 +4,25 @@ import { readQrCodes } from '../lib/qrImage'
 import { Btn, ErrorText, Field, fmtTime, inputCls, mono, Table, usePoll } from '../ui'
 import type { PageProps } from './Operations'
 
-type Kind = 'refund' | 'mfg'
+type Kind = 'refund' | 'mfg' | 'product'
+
+const KIND_LABEL: Record<Kind, string> = {
+  refund: 'Refund QR',
+  mfg: 'Manufacturing QR',
+  product: 'Product barcode',
+}
 
 const KIND_CLS: Record<string, string> = {
   refund: 'bg-emerald-100 text-emerald-800',
   mfg: 'bg-orange-100 text-orange-800',
+  product: 'bg-violet-100 text-violet-800',
 }
 
 function KindBadge({ kind }: { kind: QrCodeRow['kind'] }) {
   if (!kind) return <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">Unknown</span>
   return (
     <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${KIND_CLS[kind]}`}>
-      {kind === 'refund' ? 'Refund QR' : 'Manufacturing QR'}
+      {KIND_LABEL[kind]}
     </span>
   )
 }
@@ -73,9 +80,9 @@ export function QrRegistry({ can }: PageProps) {
     setOk('')
     try {
       const row = await post<QrCodeRow>('/qr-codes', {
-        raw, kind, brand: kind === 'mfg' ? brand : null, batch: kind === 'mfg' && batch ? batch : null, label: label || null,
+        raw, kind, brand: kind !== 'refund' ? brand : null, batch: kind !== 'refund' && batch ? batch : null, label: label || null,
       })
-      setOk(`Registered ${row.kind === 'refund' ? 'refund' : 'manufacturing'} QR - serial ${row.serial}`)
+      setOk(`Registered ${KIND_LABEL[row.kind ?? 'refund'].toLowerCase()} - serial ${row.serial}`)
       setRaw('')
       setLabel('')
       setPhotoCodes([])
@@ -125,15 +132,21 @@ export function QrRegistry({ can }: PageProps) {
             <div className="space-y-3">
               <Field label="Type">
                 <div className="flex gap-2">
-                  {(['refund', 'mfg'] as Kind[]).map((k) => (
+                  {(['refund', 'mfg', 'product'] as Kind[]).map((k) => (
                     <button key={k} onClick={() => setKind(k)}
                       className={`flex-1 rounded-lg px-3 py-2 text-sm font-semibold ring-1 ${kind === k ? 'bg-brand-700 text-white ring-brand-700' : 'bg-white text-slate-700 ring-slate-300'}`}>
-                      {k === 'refund' ? 'Refund QR' : 'Manufacturing QR'}
+                      {KIND_LABEL[k]}
                     </button>
                   ))}
                 </div>
               </Field>
-              {kind === 'mfg' && (
+              {kind === 'product' && (
+                <p className="text-xs text-slate-500">
+                  The barcode on the label (EAN) is the same on every bottle of this product. It only checks the brand;
+                  the refund QR makes each bottle unique.
+                </p>
+              )}
+              {kind !== 'refund' && (
                 <div className="grid grid-cols-2 gap-3">
                   <Field label="Brand">
                     <select className={inputCls} value={brand} onChange={(e) => setBrand(e.target.value)}>
@@ -150,7 +163,7 @@ export function QrRegistry({ can }: PageProps) {
                 <input className={inputCls} value={label} onChange={(e) => setLabel(e.target.value)} />
               </Field>
               <div className="flex items-center gap-3">
-                <Btn disabled={!raw.trim() || (kind === 'mfg' && !brand)} onClick={register}>Register</Btn>
+                <Btn disabled={!raw.trim() || (kind !== 'refund' && !brand)} onClick={register}>Register</Btn>
                 {ok && <span className="text-sm font-semibold text-emerald-700">{ok}</span>}
               </div>
               <ErrorText>{err}</ErrorText>
@@ -181,6 +194,7 @@ export function QrRegistry({ can }: PageProps) {
               <div className="flex flex-wrap gap-2 whitespace-nowrap">
                 <Btn variant="secondary" onClick={() => prefill(r.raw, 'refund')}>As refund QR</Btn>
                 <Btn variant="secondary" onClick={() => prefill(r.raw, 'mfg')}>As mfg QR</Btn>
+                <Btn variant="secondary" onClick={() => prefill(r.raw, 'product')}>As barcode</Btn>
                 <Btn variant="link" onClick={async () => { await del(`/qr-codes/${r.code_hash}`); reload() }}>Ignore</Btn>
               </div>
             ) : null,

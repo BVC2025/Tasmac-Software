@@ -188,7 +188,7 @@ export interface Report {
 export interface QrCodeRow {
   code_hash: string
   raw: string
-  kind: 'refund' | 'mfg' | null
+  kind: 'refund' | 'mfg' | 'product' | null
   serial: string
   brand: string | null
   batch: string | null

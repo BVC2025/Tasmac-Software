@@ -64,3 +64,23 @@ async def test_lookup_without_recording(machine, client, admin_h):
     kinds = (await machine.post("/qr/classify", {"codes": [REAL_REFUND], "record": False})).json()["kinds"]
     assert kinds == {REAL_REFUND: None}
     assert (await client.get("/api/admin/v1/qr-codes?status=all", headers=admin_h)).json() == []
+
+
+async def test_product_barcode_is_shared_by_every_bottle(machine, client, operator_h):
+    """The EAN on the label is the same on every bottle: the refund QR alone makes a bottle unique."""
+    ean = "8902212000545"
+    r1, r2 = "058880726627532399", "058880726627532400"
+    for raw in (r1, r2):
+        assert (await register(client, operator_h, raw, "refund")).status_code == 201
+    assert (await register(client, operator_h, ean, "product", "KF")).status_code == 201
+    kinds = (await machine.post("/qr/classify", {"codes": [r1, ean]})).json()["kinds"]
+    assert kinds == {r1: "refund", ean: "mfg"}
+
+    for sid, refund in (("s1", r1), ("s2", r2)):
+        assert (await machine.post(f"/sessions/{sid}/mfg-qr", {"raw": ean})).json()["ok"]
+        txn = await machine.full_refund(sid, refund, ean)
+        assert txn["status"] == "SUCCESS"
+        await machine.post(f"/sessions/{sid}/accepted", {"txn_id": txn["id"]})
+
+    again = (await machine.post("/sessions/s3/eligibility", {"refund_raw": r1, "mfg_raw": ean})).json()
+    assert again["reason"] == "REFUND_QR_ALREADY_USED"

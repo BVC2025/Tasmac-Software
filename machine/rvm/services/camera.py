@@ -14,6 +14,7 @@ import asyncio
 import logging
 import threading
 import time
+from collections import Counter
 from dataclasses import dataclass
 
 from .vision import Camera, Frame, QRReader
@@ -37,12 +38,20 @@ class Code:
     text: str
     format: str
     box: list[tuple[int, int]]   # 4 corners in image pixels
+    linear: bool = False         # 1D barcode: blurry frames can misread, confirm over several frames
+
+
+# a 1D barcode must read the same in this many frames of one bottle before it is used
+LINEAR_CONFIRMATIONS = 3
 
 
 def decode_image(image) -> list[Code]:
-    """All QR / DataMatrix codes in a BGR or grayscale numpy image."""
+    """All QR / DataMatrix codes and label barcodes (EAN / UPC / Code 128 / 39 / ITF) in an image."""
     _require()
-    formats = (zxingcpp.BarcodeFormat.QRCode, zxingcpp.BarcodeFormat.MicroQRCode, zxingcpp.BarcodeFormat.DataMatrix)
+    F = zxingcpp.BarcodeFormat
+    # 2D codes (refund / manufacturing QR) + the 1D barcodes printed on bottle labels
+    formats = (F.QRCode, F.MicroQRCode, F.DataMatrix, F.EAN13, F.EAN8, F.UPCA, F.Code128, F.Code39, F.ITF)
+    linear = {F.EAN13, F.EAN8, F.UPCA, F.Code128, F.Code39, F.ITF}
     out = []
     for r in zxingcpp.read_barcodes(image, formats=formats):
         if not r.valid or not r.text:
@@ -50,7 +59,7 @@ def decode_image(image) -> list[Code]:
         p = r.position
         box = [(p.top_left.x, p.top_left.y), (p.top_right.x, p.top_right.y),
                (p.bottom_right.x, p.bottom_right.y), (p.bottom_left.x, p.bottom_left.y)]
-        out.append(Code(text=r.text, format=str(r.format).split(".")[-1], box=box))
+        out.append(Code(text=r.text, format=str(r.format).split(".")[-1], box=box, linear=r.format in linear))
     return out
 
 
@@ -182,8 +191,23 @@ class OpenCVCamera(Camera):
 
 
 class ZxingQRReader(QRReader):
+    """QR codes count at once; 1D barcodes only after LINEAR_CONFIRMATIONS identical reads
+    (an EAN-13 checksum can pass on a misread from a blurry frame)."""
+
+    def __init__(self) -> None:
+        self._sightings: dict[int, Counter] = {}
+
     async def decode(self, frame: Frame) -> list[str]:
+        if frame.angle_index == 0:          # first frame of a new bottle in this lane
+            self._sightings[frame.lane] = Counter()
         if frame.image is None:
             return []
-        codes = await asyncio.to_thread(decode_image, frame.image)
-        return [c.text for c in codes]
+        seen = self._sightings.setdefault(frame.lane, Counter())
+        out = []
+        for c in await asyncio.to_thread(decode_image, frame.image):
+            if c.linear:
+                seen[c.text] += 1
+                if seen[c.text] < LINEAR_CONFIRMATIONS:
+                    continue
+            out.append(c.text)
+        return out

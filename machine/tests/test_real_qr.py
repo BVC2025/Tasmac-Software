@@ -101,3 +101,17 @@ async def test_opencv_camera_reads_qr_from_stream(tmp_path):
         assert codes and codes[0].startswith("TRQ1.")
     finally:
         cam.stop()
+
+
+async def test_barcode_needs_repeated_reads(monkeypatch):
+    pytest.importorskip("zxingcpp")
+    from rvm.services import camera
+    from rvm.services.vision import Frame
+
+    reads = iter([[("4902117000545", True)], [("8902212000545", True), ("QRTEXT", False)],
+                  [("8902212000545", True)], [("8902212000545", True)]])
+    monkeypatch.setattr(camera, "decode_image",
+                        lambda img: [camera.Code(t, "x", [], linear=lin) for t, lin in next(reads)])
+    r = camera.ZxingQRReader()
+    got = [await r.decode(Frame(lane=1, angle_index=i, image=object())) for i in range(4)]
+    assert got == [[], ["QRTEXT"], [], ["8902212000545"]]   # misread never confirmed

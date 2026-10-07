@@ -18,7 +18,7 @@ sys.path.insert(0, str(ROOT))
 
 import cv2  # noqa: E402
 
-from rvm.services.camera import decode_image  # noqa: E402
+from rvm.services.camera import LINEAR_CONFIRMATIONS, decode_image  # noqa: E402
 from rvm.services.qr_codec import classify  # noqa: E402
 
 APIS = {"auto": cv2.CAP_ANY, "dshow": cv2.CAP_DSHOW, "msmf": cv2.CAP_MSMF}
@@ -71,12 +71,13 @@ def live(src: str, api: str, seconds: float, save: bool) -> None:
             cv2.imwrite(str(out), frame)
             print(f"  snapshot saved: {out}")
         for c in decode_image(frame):
-            if c.text not in seen:
+            seen[c.text] = seen.get(c.text, 0) + 1
+            # 1D barcodes are trusted only after several identical reads (blurry frames misread)
+            if seen[c.text] == (LINEAR_CONFIRMATIONS if c.linear else 1):
                 kind = classify(c.text) or "unknown (register it in Admin -> QR registry)"
                 print(f"  NEW {c.format}: {c.text}\n      kind: {kind}")
-            seen[c.text] = seen.get(c.text, 0) + 1
     cap.release()
-    print(f"Done: {frames} frames, {len(seen)} different codes.")
+    print(f"Done: {frames} frames. Reads per code: {seen}")
 
 
 def main() -> None:

@@ -245,7 +245,7 @@ class QrCode(Base):
 
     code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)   # sha256 of the raw text
     raw: Mapped[str] = mapped_column(Text)
-    kind: Mapped[str | None] = mapped_column(String(8))     # refund | mfg | NULL (seen, not registered)
+    kind: Mapped[str | None] = mapped_column(String(8))     # refund | mfg | product | NULL (seen, not registered)
     serial: Mapped[str] = mapped_column(String(64))
     brand: Mapped[str | None] = mapped_column(String(16))   # mfg only
     batch: Mapped[str | None] = mapped_column(String(32))   # mfg only
