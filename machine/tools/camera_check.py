@@ -52,7 +52,9 @@ def list_cameras(api: str) -> None:
 def live(src: str, api: str, seconds: float, save: bool) -> None:
     cap = open_source(src, api)
     if not cap.isOpened():
-        sys.exit(f"Cannot open camera {src!r}. Try --api msmf or --api auto, and check that DroidCam is started.")
+        hint = ("Is DroidCam \"Busy\"? Stop the DroidCam PC client - the phone serves one connection at a time."
+                if "://" in src else "Try --api msmf or --api auto, and check that the camera is started.")
+        sys.exit(f"Cannot open camera {src!r}. {hint}")
     print(f"Reading QRs from {src!r} for {seconds:.0f} s - hold a bottle QR in front of the camera ...")
     seen: dict[str, int] = {}
     end = time.monotonic() + seconds

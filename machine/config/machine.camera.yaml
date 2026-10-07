@@ -22,11 +22,11 @@ simulator:
 vision_driver: camera
 camera:
   sources:
-    1: 0                            # webcam / DroidCam index; or "http://<phone-ip>:4747/video"
+    1: "http://192.168.1.3:4747/video"   # DroidCam Wi-Fi stream (phone IP from the DroidCam app); or a webcam index: 0, 1, ...
   width: 1280
   height: 720
   frame_interval_s: 0.35
-  backend: dshow                    # Windows + DroidCam; try "msmf" or "auto" if it does not open
+  backend: dshow                    # only for webcam indexes; try "msmf" or "auto" if one does not open
 
 backend_driver: http
 backend:
