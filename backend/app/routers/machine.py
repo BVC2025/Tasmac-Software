@@ -9,7 +9,7 @@ from .. import services as svc
 from ..db import get_db
 from ..models import Machine
 from ..schemas import (
-    AcceptedIn, BottleRejectedIn, DestinationIn, EligibilityIn, HeartbeatIn, QRIn, ReturnedIn, TransactionIn, TxnOut,
+    AcceptedIn, BottleRejectedIn, ClassifyIn, DestinationIn, EligibilityIn, HeartbeatIn, QRIn, ReturnedIn, TransactionIn, TxnOut,
     VerdictOut,
 )
 from ..security import current_machine
@@ -20,6 +20,13 @@ router = APIRouter(prefix="/api/machine/v1", tags=["machine"])
 @router.post("/heartbeat", status_code=204)
 async def heartbeat(body: HeartbeatIn, m: Machine = Depends(current_machine), db: AsyncSession = Depends(get_db)):
     await svc.heartbeat(db, m, body.state, body.bin_fill_pct, body.software_version, body.fault_reason)
+
+
+@router.post("/qr/classify")
+async def classify_qr(body: ClassifyIn, m: Machine = Depends(current_machine), db: AsyncSession = Depends(get_db)):
+    """Which of the codes read from a bottle is its refund / manufacturing QR."""
+    codes = [c[:512] for c in body.codes]
+    return {"kinds": await svc.classify_codes(db, m, codes, body.record)}
 
 
 @router.post("/sessions/{session_id}/refund-qr", response_model=VerdictOut)

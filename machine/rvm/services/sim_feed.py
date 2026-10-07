@@ -49,6 +49,14 @@ class SimBottleFeed:
                 return
         raise KeyError(name)
 
+    def set_custom(self, bottle: SimBottle) -> None:
+        """Add (or replace) the DEV-panel bottle with QR codes typed / uploaded by the tester."""
+        for i, b in enumerate(self.bottles):
+            if b.name == bottle.name:
+                self.bottles[i] = bottle   # a bottle already inside a lane keeps its old object
+                return
+        self.bottles.append(bottle)
+
     def refresh_serials(self, secret: str) -> None:
         """Give every test bottle new QR serials (same scenario, same signature validity).
 

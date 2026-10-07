@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api, type SessionRow, type SimBottle } from '../api'
 import type { MachineView } from '../useMachine'
 import { WrenchIcon, XIcon } from './Icons'
+import { RealQrTest } from './RealQrTest'
 
 const SAMPLE_QR = 'upi://pay?pa=ravi.kumar@okaxis&pn=Ravi%20Kumar&cu=INR'
 const SAMPLE_VOICE = 'ஒன்பது எட்டு ஏழு ஆறு ஐந்து நான்கு மூன்று இரண்டு ஒன்று பூஜ்ஜியம்'
@@ -76,6 +77,8 @@ export function DevPanel({ view }: { view: MachineView }) {
         {view.message && <div className="truncate">msg: {JSON.stringify({ ...view.message, at: undefined, type: undefined })}</div>}
       </section>
 
+      <RealQrTest lane={lane} input={input} btn={btn} />
+
       <section className="space-y-2">
         <h3 className="font-semibold text-slate-400">1. Insert test bottles</h3>
         {view.laneCount > 1 && (
@@ -102,7 +105,7 @@ export function DevPanel({ view }: { view: MachineView }) {
           </div>
         )}
         <div className="flex items-center gap-1 text-xs">
-          <span className="mr-1 text-slate-400">Single bottle into</span>
+          <span className="mr-1 text-slate-400">Single / real bottle into</span>
           {[undefined, ...laneNumbers].map((ln) => (
             <button key={ln ?? 'auto'} onClick={() => setLane(ln)}
               className={`rounded-md px-2 py-1 font-semibold ${lane === ln ? 'bg-amber-400 text-slate-900' : 'bg-slate-700 text-white'}`}>

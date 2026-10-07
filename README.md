@@ -114,8 +114,34 @@ cd admin && npm install && npm run dev                                          
 ```
 
 In the kiosk, the **DEV** button (bottom right, simulation only) inserts test bottles, simulates a UPI QR
-scan or spoken number, presses the e-stop, and refreshes test QR codes.
+scan or spoken number, presses the e-stop, refreshes test QR codes and tests real bottle QRs (below).
 Without a browser: `cd machine && .venv/Scripts/python tools/kiosk_smoke.py --bottles 13`.
+
+### Testing with real bottles (before the machine exists)
+
+Real TASMAC QRs are not in our test format, so the backend accepts one only after it is registered in
+**Admin → QR registry** (switch off with `RVM_QR_REGISTRY_ENABLED=false` once TASMAC's own verification is
+connected). Every QR a machine reads but does not recognise is listed there under *Seen by machines*; the
+one-time-use rule still applies.
+
+**With a camera** (webcam, or a phone via DroidCam / Iriun):
+
+```bash
+cd machine
+.venv/Scripts/python -m pip install -r requirements.txt     # adds opencv + zxing-cpp
+.venv/Scripts/python tools/camera_check.py                  # lists cameras; the phone is usually the last index
+.venv/Scripts/python tools/camera_check.py --source 1       # hold a bottle QR up: prints what it reads
+# put that index (or "http://<phone-ip>:4747/video") in config/machine.camera.yaml -> camera.sources
+.venv/Scripts/python -m rvm.main --config config/machine.camera.yaml
+```
+
+Kiosk DEV panel → *Real bottle QR test* shows the live picture (green = refund QR, orange = manufacturing
+QR, red = unknown). Press *Insert bottle*, then show the refund QR and the manufacturing QR to the camera.
+The UPI scan screen then reads from the same camera (the browser cannot open it while the machine holds it).
+Damage inspection is still simulated: pick the bottle condition in the panel.
+
+**Without a camera** (normal `machine.dev.yaml`): in the same panel, upload a photo of the bottle QRs or
+paste the QR text from a phone scanner app, then *Insert bottle with these QRs*.
 
 ### Voice prompts (Sarvam AI)
 

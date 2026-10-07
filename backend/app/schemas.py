@@ -10,6 +10,11 @@ class VerdictOut(BaseModel):
     data: dict = Field(default_factory=dict)
 
 
+class ClassifyIn(BaseModel):
+    codes: list[str] = Field(max_length=16)
+    record: bool = True   # False: only look up, do not log unknown codes
+
+
 class QRIn(BaseModel):
     raw: str = Field(max_length=512)
     lane: int = Field(default=1, ge=1, le=3)

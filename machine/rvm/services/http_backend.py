@@ -13,6 +13,7 @@ from pathlib import Path
 
 import httpx
 
+from . import qr_codec
 from .backend import Backend, Destination, PayoutStatus, Verdict
 
 log = logging.getLogger(__name__)
@@ -94,6 +95,16 @@ class HttpBackend(Backend):
         await self._request("POST", "/heartbeat", {
             "state": state, "bin_fill_pct": bin_fill_pct, "software_version": software_version,
             "fault_reason": (fault_reason or "")[:128] or None})
+
+    async def classify_qr(self, codes: list[str], record: bool = True) -> dict[str, str | None]:
+        """Test-format codes locally; anything else (real TASMAC QRs) is looked up on the server."""
+        kinds = {c: qr_codec.classify(c) for c in codes}
+        unknown = [c for c, k in kinds.items() if k is None]
+        if unknown:
+            d = await self._request("POST", "/qr/classify", {"codes": unknown, "record": record})
+            server = d["kinds"]
+            kinds.update({c: server.get(c.strip()) for c in unknown})
+        return kinds
 
     async def verify_refund_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict:
         return self._verdict(await self._request(

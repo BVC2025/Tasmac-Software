@@ -68,6 +68,7 @@ class Bottle:
     step: LaneStep = LaneStep.DETECTED
     frames: list[Frame] = field(default_factory=list)
     codes: list[str] = field(default_factory=list)
+    kinds: dict[str, str | None] = field(default_factory=dict)   # code -> refund | mfg | None (unreadable)
     refund_qr: str | None = None
     mfg_qr: str | None = None
     amount_paise: int = 0
@@ -370,7 +371,8 @@ class Orchestrator:
             self._lane_step(b, LaneStep.SCANNING_REFUND_QR)
             b.refund_qr = await self._find_qr(b, "refund")
             if not b.refund_qr:
-                raise LaneRejected("REFUND_QR_NOT_FOUND")
+                # a code was read but it is not a TASMAC refund QR we know
+                raise LaneRejected("REFUND_QR_INVALID_FORMAT" if None in b.kinds.values() else "REFUND_QR_NOT_FOUND")
             v = await self._backend_or_lane_reject(self.backend.verify_refund_qr(session.id, b.refund_qr, ln))
             if not v.ok:
                 raise LaneRejected(v.reason)
@@ -378,7 +380,7 @@ class Orchestrator:
             self._lane_step(b, LaneStep.SCANNING_MFG_QR)
             b.mfg_qr = await self._find_qr(b, "mfg")
             if not b.mfg_qr:
-                raise LaneRejected("MFG_QR_NOT_FOUND")
+                raise LaneRejected("MFG_QR_INVALID_FORMAT" if None in b.kinds.values() else "MFG_QR_NOT_FOUND")
             v = await self._backend_or_lane_reject(self.backend.verify_mfg_qr(session.id, b.mfg_qr, ln))
             if not v.ok:
                 raise LaneRejected(v.reason)
@@ -430,7 +432,9 @@ class Orchestrator:
     async def _capture_and_rotate(self, b: Bottle) -> None:
         frame = await self.camera.capture(b.lane, len(b.frames))
         b.frames.append(frame)
-        b.codes.extend(await self.qr_reader.decode(frame))
+        for code in await self.qr_reader.decode(frame):
+            if code not in b.codes:   # a real camera sees the same code in many frames
+                b.codes.append(code)
         step = 360 // max(self.flow.inspection_angles, 1)
         await self.plc.command(Cmd.ROTATE_BOTTLE, param=step, lane=b.lane)
 
@@ -438,13 +442,20 @@ class Orchestrator:
         """Use codes from inspection frames; rotate further if not found yet."""
         extra = 0
         while True:
-            for code in b.codes:
-                if qr_codec.classify(code) == kind:
+            new = [c for c in b.codes if c not in b.kinds]
+            if new:
+                b.kinds.update(await self._classify(new))
+            for code, k in b.kinds.items():
+                if k == kind:
                     return code
             if extra >= self.flow.qr_scan_max_rotations:
                 return None
             await self._capture_and_rotate(b)
             extra += 1
+
+    async def _classify(self, codes: list[str]) -> dict[str, str | None]:
+        """Which code is the refund / manufacturing QR: the server knows the real TASMAC QRs."""
+        return await self._backend_or_lane_reject(self.backend.classify_qr(codes))
 
     # ======================= customer + payout =======================
 

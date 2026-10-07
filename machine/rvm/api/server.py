@@ -5,16 +5,23 @@
     POST /api/customer/destination {"value": "ravi@okaxis"} or {"cancel": true}
     POST /api/customer/confirm     {"ok": true}
 
+Testing aids:
+    GET  /api/camera               real cameras (vision_driver: camera): status per lane
+    GET  /api/camera/{lane}/preview  latest frame (JPEG, data URL) + codes found in it
+    POST /api/qr/decode            body = an image file; returns every QR in it
+
 Simulation only (when the PLC simulator runs in-process):
     POST /api/sim/insert           insert the next test bottle
+    POST /api/sim/insert-custom    insert a bottle with given QR texts
     POST /api/sim/estop            {"pressed": true|false}
 """
 
 import asyncio
+import base64
 import logging
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Literal
 
@@ -24,7 +31,8 @@ from ..core.events import Event, EventBus
 from ..core.orchestrator import Orchestrator
 from ..plc.simulator import PLCSimulator
 from ..services.customer import RefundInput, WebCustomer
-from ..services.sim_feed import SimBottleFeed
+from ..services import qr_codec
+from ..services.sim_feed import SimBottle, SimBottleFeed
 
 log = logging.getLogger(__name__)
 
@@ -43,6 +51,16 @@ class SimInsertIn(BaseModel):
 
 class SimBatchIn(BaseModel):
     bottles: list[str | None] = Field(default_factory=list, max_length=3)  # one per lane, None = next in feed
+
+
+class SimCustomIn(BaseModel):
+    refund_qr: str | None = Field(default=None, max_length=512)
+    mfg_qr: str | None = Field(default=None, max_length=512)
+    condition: Literal["ok", "damaged", "foreign"] = "ok"
+    lane: int | None = None
+
+
+MAX_IMAGE_BYTES = 15 * 1024 * 1024
 
 
 class ConfirmIn(BaseModel):
@@ -179,6 +197,83 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
             if got:
                 placed.append({"lane": got, "bottle": feed.at(got).name if feed else None})
         return {"inserted": placed}
+
+    @app.post("/api/sim/insert-custom")
+    async def sim_insert_custom(body: SimCustomIn):
+        """A bottle carrying the given QR texts (e.g. read from a real TASMAC bottle with a phone)."""
+        if sim is None or feed is None:
+            raise HTTPException(404, "Not in simulation mode")
+        feed.set_custom(SimBottle(name="custom", condition=body.condition,
+                                  refund_qr=(body.refund_qr or "").strip() or None,
+                                  mfg_qr=(body.mfg_qr or "").strip() or None))
+        feed.select_next("custom")
+        lane = sim.insert_bottle(body.lane)
+        return {"inserted": lane is not None, "lane": lane}
+
+    # ---------------- QR / camera testing aids ----------------
+
+    async def kinds_of(texts: list[str], record: bool = True) -> dict[str, str | None]:
+        if not texts:
+            return {}
+        try:
+            return await orch.backend.classify_qr(texts, record)
+        except Exception:
+            return {t: qr_codec.classify(t) for t in texts}
+
+    @app.post("/api/qr/decode")
+    async def qr_decode(request: Request):
+        """Every QR in an uploaded photo; kind = refund / mfg / null (unknown to the server)."""
+        from ..services.camera import decode_bytes
+
+        data = await request.body()
+        if not data or len(data) > MAX_IMAGE_BYTES:
+            raise HTTPException(413 if data else 400, "Send one image up to 15 MB as the request body")
+        try:
+            codes = await asyncio.to_thread(decode_bytes, data)
+        except ValueError:
+            raise HTTPException(400, "Not an image")
+        except RuntimeError as e:
+            raise HTTPException(501, str(e))
+        kinds = await kinds_of([c.text for c in codes])
+        return {"codes": [{"text": c.text, "format": c.format, "kind": kinds.get(c.text)} for c in codes]}
+
+    def camera_or_404():
+        cam = orch.camera
+        if not hasattr(cam, "source"):
+            raise HTTPException(404, "No real camera (vision_driver is mock)")
+        return cam
+
+    @app.get("/api/camera")
+    async def camera_status():
+        cam = orch.camera
+        if not hasattr(cam, "source"):
+            return {"enabled": False, "lanes": {}}
+        return {"enabled": True, "lanes": {
+            ln: {"source": str(src.source), "connected": src.connected, "error": src.error, "fps": round(src.fps, 1)}
+            for ln, src in cam.lanes.items()}}
+
+    @app.get("/api/camera/{lane}/preview")
+    async def camera_preview(lane: int, width: int = 640):
+        """Latest frame with the codes it contains outlined (for aiming the bottle)."""
+        from ..services.camera import cv2, decode_image
+
+        src = camera_or_404().source(lane)
+        frame, age = src.latest()
+        if frame is None:
+            return {"connected": src.connected, "error": src.error, "image": None, "codes": []}
+        codes = await asyncio.to_thread(decode_image, frame)
+        kinds = await kinds_of([c.text for c in codes], record=False)
+        for c in codes:
+            color = {"refund": (40, 167, 69), "mfg": (255, 140, 0)}.get(kinds.get(c.text), (0, 0, 230))
+            for i in range(4):
+                cv2.line(frame, c.box[i], c.box[(i + 1) % 4], color, 4)
+        scale = min(1.0, max(160, min(width, 1280)) / frame.shape[1])
+        if scale < 1:
+            frame = cv2.resize(frame, None, fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+        ok, jpg = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+        return {"connected": src.connected, "error": src.error, "age_s": round(age, 2),
+                "image": "data:image/jpeg;base64," + base64.b64encode(jpg.tobytes()).decode() if ok else None,
+                "codes": [{"text": c.text, "format": c.format, "kind": kinds.get(c.text)} for c in codes]}
 
     @app.post("/api/sim/estop")
     async def sim_estop(body: EstopIn):

@@ -22,7 +22,7 @@ from .services.customer import AutoCustomer, CustomerInterface, WebCustomer
 from .services.http_backend import HttpBackend
 from .services.session_log import SessionLog
 from .services.sim_feed import SimBottle, SimBottleFeed
-from .services.vision import MockCamera, MockInspector, MockQRReader
+from .services.vision import Camera, MockCamera, MockInspector, MockQRReader, QRReader
 
 log = logging.getLogger("rvm")
 
@@ -38,15 +38,26 @@ def make_customer(cfg: MachineConfig, feed: SimBottleFeed) -> CustomerInterface:
     return WebCustomer() if cfg.customer_driver == "web" else AutoCustomer(feed)
 
 
+def make_vision(cfg: MachineConfig, feed: SimBottleFeed) -> tuple[Camera, QRReader]:
+    if cfg.vision_driver == "camera":
+        from .services.camera import OpenCVCamera, ZxingQRReader
+
+        c = cfg.camera
+        return OpenCVCamera(c.sources, c.width, c.height, c.frame_interval_s, c.backend), ZxingQRReader()
+    return MockCamera(), MockQRReader(feed, cfg.flow.inspection_angles)
+
+
 def build(cfg: MachineConfig, feed: SimBottleFeed) -> tuple[Orchestrator, ModbusPLC, EventBus]:
     bus = EventBus()
     plc = ModbusPLC(cfg.plc)
+    camera, qr_reader = make_vision(cfg, feed)
     orch = Orchestrator(
         cfg=cfg,
         plc=plc,
-        camera=MockCamera(),
+        camera=camera,
+        # damage / foreign-object detection is still simulated (DEV panel picks the condition)
         inspector=MockInspector(feed),
-        qr_reader=MockQRReader(feed, cfg.flow.inspection_angles),
+        qr_reader=qr_reader,
         backend=make_backend(cfg, feed),
         customer=make_customer(cfg, feed),
         bus=bus,
@@ -98,6 +109,9 @@ async def run(cfg: MachineConfig) -> None:
         await sim.start()
 
     orch, plc, bus = build(cfg, feed)
+    camera = orch.camera if hasattr(orch.camera, "start") else None
+    if camera:
+        camera.start()
     await plc.start()
     tasks = [
         asyncio.create_task(orch.run()),
@@ -117,6 +131,8 @@ async def run(cfg: MachineConfig) -> None:
         for t in tasks:
             t.cancel()
         await plc.stop()
+        if camera:
+            camera.stop()
         if sim:
             await sim.stop()
 

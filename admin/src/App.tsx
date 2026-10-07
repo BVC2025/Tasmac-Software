@@ -3,10 +3,11 @@ import { BACKEND, login, RANK, setAuth, type User } from './api'
 import machineImg from './assets/rvm-machine.jpg'
 import {
   BellIcon, ChartIcon, GridIcon, ListIcon, LockIcon, LogoutIcon, MachineIcon, MessageIcon, QrIcon, ReceiptIcon,
-  ShieldIcon, TagIcon, UserIcon, UsersIcon,
+  ScanIcon, ShieldIcon, TagIcon, UserIcon, UsersIcon,
 } from './components/Icons'
 import { PasswordInput } from './components/PasswordInput'
 import { Account, Brands, fetchMe, Machines, Reports, Users } from './pages/Manage'
+import { QrRegistry } from './pages/QrRegistry'
 import { Alerts, Audit, Claims, Overview, Sessions, Sms, Transactions, type PageProps } from './pages/Operations'
 import { usePoll } from './ui'
 
@@ -50,6 +51,7 @@ const PAGES: Page[] = [
   { key: 'sms', label: 'SMS', subtitle: 'Refund confirmations sent to customers', icon: MessageIcon, component: Sms, group: 'Operations' },
   { key: 'reports', label: 'Reports', subtitle: 'Daily figures per machine, exportable to CSV', icon: ChartIcon, component: Reports, group: 'Operations' },
   { key: 'machines', label: 'Machines', subtitle: 'Registered RVMs, keys and status', icon: MachineIcon, component: Machines, group: 'Administration' },
+  { key: 'qr-registry', label: 'QR registry', subtitle: 'Real bottle QRs accepted for the demo / pilot', icon: ScanIcon, component: QrRegistry, group: 'Administration' },
   { key: 'brands', label: 'Eligible brands', subtitle: 'Brands that qualify for the ₹10 refund', icon: TagIcon, component: Brands, group: 'Administration' },
   { key: 'users', label: 'Users & roles', subtitle: 'Portal accounts and permissions', icon: UsersIcon, component: Users, min: 'ADMIN', group: 'Administration' },
   { key: 'audit', label: 'Audit log', subtitle: 'Tamper-evident trail of every action', icon: ShieldIcon, component: Audit, group: 'Administration' },

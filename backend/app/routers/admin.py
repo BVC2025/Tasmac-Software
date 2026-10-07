@@ -15,10 +15,11 @@ from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .. import qr as qrfmt
 from .. import services as svc
 from ..db import get_db
 from ..models import (
-    AdminUser, Alert, AuditLog, BottleState, EligibleBrand, Machine, RefundClaim, Role, RvmSession, SessionBottle,
+    AdminUser, Alert, AuditLog, BottleState, EligibleBrand, Machine, QrCode, RefundClaim, Role, RvmSession, SessionBottle,
     SmsMessage, Transaction, TxnStatus, utcnow,
 )
 from ..schemas import MachineOut, StatsOut, TxnAdminOut
@@ -376,3 +377,105 @@ async def claims(status: str | None = None, q: str | None = Query(None, max_leng
     return [{"refund_serial": r.refund_serial, "mfg_serial": r.mfg_serial, "brand": r.brand, "status": r.status,
              "machine_id": r.machine_id, "session_id": r.session_id, "consumed_at": r.consumed_at,
              "updated_at": r.updated_at} for r in rows]
+
+
+# ---------------- QR registry (real bottle QRs for the demo / pilot) ----------------
+
+class QrRegisterIn(BaseModel):
+    raw: str = Field(min_length=1, max_length=512)
+    kind: str = Field(pattern="^(refund|mfg)$")
+    brand: str | None = Field(default=None, max_length=16)
+    batch: str | None = Field(default=None, max_length=32)
+    label: str | None = Field(default=None, max_length=120)
+
+
+class QrUpdateIn(BaseModel):
+    kind: str | None = Field(default=None, pattern="^(refund|mfg)$")
+    brand: str | None = Field(default=None, max_length=16)
+    batch: str | None = Field(default=None, max_length=32)
+    label: str | None = Field(default=None, max_length=120)
+    active: bool | None = None
+
+
+def _qr_out(r: QrCode) -> dict:
+    return {"code_hash": r.code_hash, "raw": r.raw, "kind": r.kind, "serial": r.serial, "brand": r.brand,
+            "batch": r.batch, "label": r.label, "active": r.active, "seen_count": r.seen_count,
+            "last_seen_at": r.last_seen_at, "last_machine_id": r.last_machine_id,
+            "registered_by": r.registered_by, "created_at": r.created_at}
+
+
+async def _check_mfg_brand(db: AsyncSession, kind: str | None, brand: str | None) -> None:
+    if kind == "mfg" and (not brand or await db.get(EligibleBrand, brand) is None):
+        raise HTTPException(422, "Manufacturing QR needs a brand from the brand list")
+
+
+@router.get("/qr-codes")
+async def qr_codes(status: str = Query("registered", pattern="^(registered|unknown|all)$"),
+                   q: str | None = Query(None, max_length=120), limit: int = Query(200, le=1000),
+                   db: AsyncSession = Depends(get_db)):
+    query = select(QrCode).limit(limit)
+    if status == "registered":
+        query = query.where(QrCode.kind.is_not(None)).order_by(QrCode.created_at.desc())
+    elif status == "unknown":
+        query = query.where(QrCode.kind.is_(None)).order_by(QrCode.last_seen_at.desc().nulls_last())
+    else:
+        query = query.order_by(QrCode.created_at.desc())
+    if q:
+        like = f"%{q.strip()}%"
+        query = query.where(QrCode.raw.ilike(like) | QrCode.label.ilike(like) | QrCode.serial.ilike(like))
+    return [_qr_out(r) for r in (await db.execute(query)).scalars().all()]
+
+
+@router.post("/qr-codes", status_code=201)
+async def register_qr(body: QrRegisterIn, user: AdminUser = Depends(operator), db: AsyncSession = Depends(get_db)):
+    """Register a real bottle QR (also turns a previously seen unknown QR into a known one)."""
+    raw = body.raw.strip()
+    if qrfmt.classify(raw):
+        raise HTTPException(409, "This is a test-format QR; it is verified by its signature, no need to register")
+    brand = body.brand.strip().upper() if body.brand else None
+    await _check_mfg_brand(db, body.kind, brand)
+    h = qrfmt.code_hash(raw)
+    row = await db.get(QrCode, h, with_for_update=True)
+    if row is not None and row.kind is not None:
+        raise HTTPException(409, f"Already registered as a {row.kind} QR")
+    if row is None:
+        row = QrCode(code_hash=h, raw=raw, serial=qrfmt.registry_serial(raw), seen_count=0)
+        db.add(row)
+    row.kind, row.active, row.registered_by = body.kind, True, user.username
+    row.brand = brand if body.kind == "mfg" else None
+    row.batch = body.batch if body.kind == "mfg" else None
+    row.label = body.label
+    svc.audit(db, _actor(user), "QR_REGISTERED", "qr", row.serial, kind=body.kind, brand=row.brand)
+    await db.commit()
+    return _qr_out(row)
+
+
+@router.patch("/qr-codes/{code_hash}")
+async def update_qr(code_hash: str, body: QrUpdateIn, user: AdminUser = Depends(operator),
+                    db: AsyncSession = Depends(get_db)):
+    row = await db.get(QrCode, code_hash, with_for_update=True)
+    if row is None:
+        raise HTTPException(404, "QR not found")
+    changes = body.model_dump(exclude_unset=True)
+    if "brand" in changes and changes["brand"]:
+        changes["brand"] = changes["brand"].strip().upper()
+    kind = changes.get("kind", row.kind)
+    await _check_mfg_brand(db, kind, changes.get("brand", row.brand))
+    for k, v in changes.items():
+        setattr(row, k, v)
+    if kind == "refund":
+        row.brand = row.batch = None
+    svc.audit(db, _actor(user), "QR_UPDATED", "qr", row.serial, **{k: str(v) for k, v in changes.items()})
+    await db.commit()
+    return _qr_out(row)
+
+
+@router.delete("/qr-codes/{code_hash}", status_code=204)
+async def delete_qr(code_hash: str, user: AdminUser = Depends(operator), db: AsyncSession = Depends(get_db)):
+    """Forget a QR. Refund claims already made with it stay (one-time use is not undone)."""
+    row = await db.get(QrCode, code_hash)
+    if row is None:
+        raise HTTPException(404, "QR not found")
+    svc.audit(db, _actor(user), "QR_DELETED", "qr", row.serial, kind=row.kind)
+    await db.delete(row)
+    await db.commit()

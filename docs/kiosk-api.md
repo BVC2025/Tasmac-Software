@@ -71,9 +71,13 @@ All customer-facing text (Tamil / English) lives in the UI and is keyed by these
 | `GET /api/sessions?limit=20` | — | Recent sessions (destination masked) |
 | `POST /api/customer/destination` | `{"value": "ravi@okaxis", "source": "qr", "sms_mobile": "9000012345"}`, `{"value": "9876543210", "source": "voice"}` or `{"cancel": true}` | Only while state = `SELECT_REFUND_METHOD`, otherwise 409. `source` is `qr`, `voice` or `keypad`. `sms_mobile` is optional (UPI IDs only) |
 | `POST /api/customer/confirm` | `{"ok": true}` (false = re-enter destination) | Only while state = `CONFIRMING`, otherwise 409 |
+| `GET /api/camera` | — | Real cameras (`vision_driver: camera`): `{"enabled", "lanes": {lane: {source, connected, error, fps}}}` |
+| `GET /api/camera/{lane}/preview?width=640` | — | Latest frame as a JPEG data URL with the codes in it outlined, plus `codes: [{text, format, kind}]`. 404 without a real camera |
+| `POST /api/qr/decode` | an image file as the raw body | Every QR / DataMatrix in the photo: `{"codes": [{text, format, kind}]}`; `kind` is `refund`, `mfg` or `null` (unknown to the server) |
 | `GET /api/sim/bottles` | — | Simulation only: test bottle scenarios |
 | `POST /api/sim/insert` | `{"bottle": "payout-failed", "lane": 2}` (both optional) | Simulation only: insert a test bottle (default: next in feed, first free inlet) |
 | `POST /api/sim/insert-batch` | `{"bottles": ["happy-path-upi", "damaged-bottle", null]}` | Simulation only: bottles in several inlets at the same moment |
+| `POST /api/sim/insert-custom` | `{"refund_qr": "...", "mfg_qr": "...", "condition": "ok", "lane": 1}` | Simulation only: a bottle carrying the given QR texts (e.g. from a real bottle). With a real camera, send no QRs: the camera reads them |
 | `POST /api/sim/refresh` | — | Simulation only: new QR serials for all test bottles |
 | `POST /api/sim/estop` | `{"pressed": true}` | Simulation only |
 

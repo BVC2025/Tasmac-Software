@@ -12,6 +12,7 @@ export const BellIcon = (p: P) => <I {...p}><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9
 export const ReceiptIcon = (p: P) => <I {...p}><path d="M4 2v20l3-2 3 2 2-2 2 2 3-2 3 2V2l-3 2-3-2-2 2-2-2-3 2zM8 9h8M8 13h8M8 17h5" /></I>
 export const ListIcon = (p: P) => <I {...p}><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></I>
 export const QrIcon = (p: P) => <I {...p}><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3" /></I>
+export const ScanIcon = (p: P) => <I {...p}><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10" /></I>
 export const MessageIcon = (p: P) => <I {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></I>
 export const ChartIcon = (p: P) => <I {...p}><path d="M3 3v18h18M8 17v-5M13 17V8M18 17v-9" /></I>
 export const MachineIcon = (p: P) => <I {...p}><rect x="4" y="2" width="16" height="20" rx="2" /><circle cx="12" cy="9" r="3" /><path d="M9 17h6" /></I>

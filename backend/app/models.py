@@ -231,3 +231,29 @@ class Alert(Base):
     __table_args__ = (
         Index("uq_alert_open", "type", "entity_id", unique=True, postgresql_where=text("status = 'OPEN'")),
     )
+
+
+class QrCode(Base):
+    """QR registry for real TASMAC bottles until TASMAC's verification API exists.
+
+    Every QR the machines see but cannot read (not the test format) lands here with
+    kind = NULL ("unknown"). An operator then registers it as a refund or a
+    manufacturing QR, after which the machines accept it like a signed test QR.
+    """
+
+    __tablename__ = "qr_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)   # sha256 of the raw text
+    raw: Mapped[str] = mapped_column(Text)
+    kind: Mapped[str | None] = mapped_column(String(8))     # refund | mfg | NULL (seen, not registered)
+    serial: Mapped[str] = mapped_column(String(64))
+    brand: Mapped[str | None] = mapped_column(String(16))   # mfg only
+    batch: Mapped[str | None] = mapped_column(String(32))   # mfg only
+    label: Mapped[str | None] = mapped_column(String(120))
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    seen_count: Mapped[int] = mapped_column(Integer, default=0)
+    last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_machine_id: Mapped[str | None] = mapped_column(String(32))
+    registered_by: Mapped[str | None] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)

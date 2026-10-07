@@ -42,6 +42,43 @@ export const api = {
     request<{ inserted: { lane: number; bottle: string | null }[] }>('POST', '/api/sim/insert-batch', { bottles }),
   simRefresh: () => request<{ refreshed: number }>('POST', '/api/sim/refresh'),
   simEstop: (pressed: boolean) => request('POST', '/api/sim/estop', { pressed }),
+  simInsertCustom: (body: { refund_qr?: string; mfg_qr?: string; condition: string; lane?: number }) =>
+    request<{ inserted: boolean; lane: number | null }>('POST', '/api/sim/insert-custom', body),
+  cameraStatus: () => request<CameraStatus>('GET', '/api/camera'),
+  cameraPreview: (lane = 1, width = 640) => request<CameraPreview>('GET', `/api/camera/${lane}/preview?width=${width}`),
+  /** Every QR in a photo, decoded on the machine (zxing-cpp reads several codes per image). */
+  qrDecode: async (file: Blob): Promise<{ codes: DecodedCode[] }> => {
+    const res = await fetch(MACHINE_API + '/api/qr/decode', { method: 'POST', body: file })
+    if (!res.ok) {
+      let detail = res.statusText
+      try {
+        detail = (await res.json()).detail ?? detail
+      } catch {
+        /* not JSON */
+      }
+      throw new ApiError(res.status, detail)
+    }
+    return res.json()
+  },
+}
+
+export interface DecodedCode {
+  text: string
+  format: string
+  kind: 'refund' | 'mfg' | null   // null: not a test QR and not registered on the server
+}
+
+export interface CameraStatus {
+  enabled: boolean
+  lanes: Record<string, { source: string; connected: boolean; error: string | null; fps: number }>
+}
+
+export interface CameraPreview {
+  connected: boolean
+  error: string | null
+  age_s?: number
+  image: string | null
+  codes: DecodedCode[]
 }
 
 export interface SimBottle {

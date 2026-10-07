@@ -74,6 +74,11 @@ class Backend(ABC):
                         fault_reason: str | None = None) -> None:
         """Report machine status to the server (no-op for mocks)."""
 
+    async def classify_qr(self, codes: list[str], record: bool = True) -> dict[str, str | None]:
+        """'refund' / 'mfg' / None for each code read from a bottle (default: test-format prefix).
+        record=False: only look (camera preview), do not log unknown codes on the server."""
+        return {c: qr_codec.classify(c) for c in codes}
+
     @abstractmethod
     async def verify_refund_qr(self, session_id: str, raw: str, lane: int = 1) -> Verdict: ...
 

@@ -15,6 +15,9 @@ class Settings(BaseSettings):
 
     # QR verification (test format until TASMAC shares the real one)
     qr_signing_secret: str = "tasmac-test-secret-change-me"
+    # Accept real bottle QRs that an operator registered in the admin portal (demo / pilot).
+    # Turn off once TASMAC's own verification is integrated.
+    qr_registry_enabled: bool = True
 
     # Providers: "mock" until real accounts exist
     payout_provider: str = "mock"

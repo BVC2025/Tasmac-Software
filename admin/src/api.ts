@@ -43,6 +43,7 @@ async function call<T>(method: string, path: string, body?: unknown): Promise<T>
 export const get = <T>(path: string) => call<T>('GET', path)
 export const post = <T>(path: string, body?: unknown) => call<T>('POST', path, body ?? {})
 export const patch = <T>(path: string, body: unknown) => call<T>('PATCH', path, body)
+export const del = <T>(path: string) => call<T>('DELETE', path)
 
 export async function download(path: string, filename: string) {
   const res = await fetch(BASE + path, { headers: { Authorization: `Bearer ${token}` } })
@@ -182,4 +183,20 @@ export interface Report {
   to: string
   rows: ReportRow[]
   totals: Omit<ReportRow, 'day' | 'machine_id'>
+}
+
+export interface QrCodeRow {
+  code_hash: string
+  raw: string
+  kind: 'refund' | 'mfg' | null
+  serial: string
+  brand: string | null
+  batch: string | null
+  label: string | null
+  active: boolean
+  seen_count: number
+  last_seen_at: string | null
+  last_machine_id: string | null
+  registered_by: string | null
+  created_at: string
 }

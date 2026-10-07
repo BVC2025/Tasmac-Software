@@ -32,6 +32,25 @@ class QRError(ValueError):
         self.code = code
 
 
+def code_hash(raw: str) -> str:
+    return hashlib.sha256(raw.strip().encode()).hexdigest()
+
+
+def registry_serial(raw: str) -> str:
+    """Stable serial for a registered real QR (its payload format is unknown to us)."""
+    return "Q" + code_hash(raw)[:15].upper()
+
+
+def classify(raw: str) -> str | None:
+    """'refund' / 'mfg' for the test format, else None."""
+    raw = raw.strip()
+    if raw.startswith("TRQ1."):
+        return "refund"
+    if raw.startswith("TMQ1."):
+        return "mfg"
+    return None
+
+
 def _sign(secret: str, body: str) -> str:
     return hmac.new(secret.encode(), body.encode(), hashlib.sha256).hexdigest()[:16]
 

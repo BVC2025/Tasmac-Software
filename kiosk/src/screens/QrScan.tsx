@@ -1,14 +1,17 @@
 import jsQR from 'jsqr'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { api } from '../api'
 import { Banner, Button } from '../components/ui'
 import { CheckIcon, QrIcon } from '../components/Icons'
 import { useLang } from '../i18n'
+import { videoConstraints } from '../lib/camera'
 import { parseUpiQr, type UpiTarget } from '../lib/upi'
 import { useVoice } from '../voice'
 
 /**
  * Reads a UPI QR from:
- *  - the kiosk camera (getUserMedia + jsQR)
+ *  - the kiosk camera (getUserMedia + jsQR), or the machine's own camera when the
+ *    machine runs with vision_driver: camera (it already holds the device, e.g. DroidCam)
  *  - a USB/HID QR scanner (types the payload + Enter like a keyboard)
  *  - the dev panel (window event "kiosk:scan")
  */
@@ -18,6 +21,15 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
   const [camera, setCamera] = useState<'starting' | 'on' | 'off'>(() => (navigator.mediaDevices ? 'starting' : 'off'))
   const [found, setFound] = useState<UpiTarget | null>(null)
   const [invalid, setInvalid] = useState(false)
+  const [source, setSource] = useState<'unknown' | 'machine' | 'browser'>('unknown')
+  const [frame, setFrame] = useState<string | null>(null)
+
+  useEffect(() => {
+    api.cameraStatus().then(
+      (s) => setSource(s.enabled ? 'machine' : 'browser'),
+      () => setSource('browser'),
+    )
+  }, [])
 
   const { play } = useVoice()
   const handle = useCallback((text: string) => {
@@ -33,9 +45,35 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
     }
   }, [play])
 
-  // Camera scanning
+  // Machine camera: poll its preview (codes are decoded on the machine)
   useEffect(() => {
-    if (found) return
+    if (found || source !== 'machine') return
+    let stopped = false
+    let timer: number | undefined
+    const tick = async () => {
+      try {
+        const p = await api.cameraPreview(1, 640)
+        if (stopped) return
+        setFrame(p.image)
+        setCamera(p.image ? 'on' : 'off')
+        const upi = p.codes.find((c) => parseUpiQr(c.text))
+        if (upi) handle(upi.text)
+        else if (p.codes.length) setInvalid(true)
+      } catch {
+        if (!stopped) setCamera('off')
+      }
+      if (!stopped) timer = window.setTimeout(tick, 350)
+    }
+    tick()
+    return () => {
+      stopped = true
+      window.clearTimeout(timer)
+    }
+  }, [found, source, handle])
+
+  // Browser camera scanning
+  useEffect(() => {
+    if (found || source !== 'browser') return
     let stream: MediaStream | null = null
     let timer: number | undefined
     let stopped = false
@@ -43,7 +81,7 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
     const ctx = canvas.getContext('2d', { willReadFrequently: true })
 
     navigator.mediaDevices
-      ?.getUserMedia({ video: { facingMode: 'user', width: 640, height: 480 } })
+      ?.getUserMedia({ video: videoConstraints() })
       .then((s) => {
         if (stopped) return s.getTracks().forEach((tr) => tr.stop())
         stream = s
@@ -71,7 +109,7 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
       window.clearTimeout(timer)
       stream?.getTracks().forEach((tr) => tr.stop())
     }
-  }, [found, handle])
+  }, [found, source, handle])
 
   // HID scanner (keyboard wedge) + dev panel simulation
   useEffect(() => {
@@ -122,7 +160,11 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
     <div className="flex w-full flex-col items-center gap-6">
       <p className="text-center text-xl text-slate-600">{t.qrSub}</p>
       <div className="relative aspect-[4/3] w-full max-w-lg overflow-hidden rounded-3xl bg-slate-900">
-        <video ref={videoRef} muted playsInline className="h-full w-full -scale-x-100 object-cover" />
+        {source === 'machine' ? (
+          frame && <img src={frame} alt="" className="h-full w-full -scale-x-100 object-cover" />
+        ) : (
+          <video ref={videoRef} muted playsInline className="h-full w-full -scale-x-100 object-cover" />
+        )}
         {camera !== 'on' && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-4 p-6 text-center text-slate-300">
             <QrIcon className="h-24 w-24" />

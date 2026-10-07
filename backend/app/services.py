@@ -20,8 +20,8 @@ from . import qr
 from .alerts import raise_alert
 from .config import get_settings
 from .models import (
-    AlertType, AuditLog, BottleState, BottleStatus, SessionBottle, ClaimStatus, EligibleBrand, Machine, RefundClaim, RvmSession,
-    SmsMessage, Transaction, TxnStatus, utcnow,
+    AlertType, AuditLog, BottleState, BottleStatus, SessionBottle, ClaimStatus, EligibleBrand, Machine, QrCode, RefundClaim,
+    RvmSession, SmsMessage, Transaction, TxnStatus, utcnow,
 )
 from .providers import PayoutResult, get_payout_provider, get_sms_provider
 
@@ -115,13 +115,67 @@ async def _mfg_consumed(db: AsyncSession, mfg_serial: str) -> bool:
     return res.first() is not None
 
 
+# ---------------- QR parsing: signed test format, then the registry of real QRs ----------------
+
+async def _registered(db: AsyncSession, raw: str, kind: str) -> QrCode | None:
+    if not settings.qr_registry_enabled:
+        return None
+    row = await db.get(QrCode, qr.code_hash(raw))
+    return row if row is not None and row.kind == kind and row.active else None
+
+
+async def parse_refund(db: AsyncSession, raw: str) -> qr.RefundQR:
+    try:
+        return qr.parse_refund(raw, settings.qr_signing_secret)
+    except qr.QRError as e:
+        if e.code != "REFUND_QR_INVALID_FORMAT" or not (row := await _registered(db, raw, "refund")):
+            raise
+        return qr.RefundQR(serial=row.serial)
+
+
+async def parse_mfg(db: AsyncSession, raw: str) -> qr.MfgQR:
+    try:
+        return qr.parse_mfg(raw, settings.qr_signing_secret)
+    except qr.QRError as e:
+        if e.code != "MFG_QR_INVALID_FORMAT" or not (row := await _registered(db, raw, "mfg")):
+            raise
+        return qr.MfgQR(brand=row.brand or "", batch=row.batch or "-", serial=row.serial)
+
+
+async def classify_codes(db: AsyncSession, machine: Machine, codes: list[str],
+                         record: bool = True) -> dict[str, str | None]:
+    """Tell the machine which of the codes it read is the refund / manufacturing QR.
+
+    Codes that are neither the test format nor registered are remembered as "unknown"
+    so an operator can register them from the admin portal.
+    """
+    out: dict[str, str | None] = {}
+    for raw in dict.fromkeys(c.strip() for c in codes if c and c.strip()):
+        kind = qr.classify(raw)
+        if kind is None and settings.qr_registry_enabled and not record:
+            row = await db.get(QrCode, qr.code_hash(raw))
+            kind = row.kind if row is not None and row.active else None
+        elif kind is None and settings.qr_registry_enabled:
+            h = qr.code_hash(raw)
+            await db.execute(pg_insert(QrCode).values(
+                code_hash=h, raw=raw, kind=None, serial=qr.registry_serial(raw), active=True, seen_count=0,
+            ).on_conflict_do_nothing(index_elements=["code_hash"]))
+            row = await db.get(QrCode, h, with_for_update=True)
+            row.seen_count += 1
+            row.last_seen_at, row.last_machine_id = utcnow(), machine.id
+            kind = row.kind if row.active else None
+        out[raw] = kind
+    await db.commit()
+    return out
+
+
 # ---------------- QR verification (per bottle / lane) ----------------
 
 async def verify_refund_qr(db: AsyncSession, machine: Machine, session_id: str, raw: str, lane: int = 1) -> Verdict:
     s = await get_or_create_session(db, machine, session_id)
     b = await _bottle(db, s, lane)
     try:
-        r = qr.parse_refund(raw, settings.qr_signing_secret)
+        r = await parse_refund(db, raw)
     except qr.QRError as e:
         _reject(b, e.code)
         audit(db, f"machine:{machine.id}", "REFUND_QR_REJECTED", "session", session_id, reason=e.code, lane=lane)
@@ -142,7 +196,7 @@ async def verify_mfg_qr(db: AsyncSession, machine: Machine, session_id: str, raw
     s = await get_or_create_session(db, machine, session_id)
     b = await _bottle(db, s, lane)
     try:
-        m = qr.parse_mfg(raw, settings.qr_signing_secret)
+        m = await parse_mfg(db, raw)
     except qr.QRError as e:
         _reject(b, e.code)
         await db.commit()
@@ -168,8 +222,8 @@ async def check_eligibility(db: AsyncSession, machine: Machine, session_id: str,
                             refund_raw: str, mfg_raw: str, lane: int = 1) -> Verdict:
     s = await get_or_create_session(db, machine, session_id)
     try:
-        r = qr.parse_refund(refund_raw, settings.qr_signing_secret)
-        m = qr.parse_mfg(mfg_raw, settings.qr_signing_secret)
+        r = await parse_refund(db, refund_raw)
+        m = await parse_mfg(db, mfg_raw)
     except qr.QRError as e:
         return await _eligibility_rejected(db, machine, session_id, lane, e.code)
 

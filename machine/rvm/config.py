@@ -67,6 +67,20 @@ class LocalApiConfig(BaseModel):
     cors_origins: list[str] = Field(default_factory=lambda: ["http://localhost:5173"])
 
 
+class CameraConfig(BaseModel):
+    """Real cameras (vision_driver: camera). Lane -> OpenCV device index or stream URL.
+
+    DroidCam / Iriun on a PC: the phone appears as a webcam (index 0, 1, ...), or use
+    the DroidCam Wi-Fi stream directly: "http://<phone-ip>:4747/video".
+    Lanes without an entry share the first camera.
+    """
+    sources: dict[int, int | str] = Field(default_factory=lambda: {1: 0})
+    width: int = 1280
+    height: int = 720
+    frame_interval_s: float = 0.35   # pause before each capture so the bottle can turn
+    backend: Literal["auto", "dshow", "msmf"] = "auto"
+
+
 class MachineConfig(BaseModel):
     machine_id: str = "RVM-DEV-001"
     software_version: str = "0.3.0"
@@ -77,7 +91,8 @@ class MachineConfig(BaseModel):
     qr: QRConfig = Field(default_factory=QRConfig)
     backend: BackendConfig = Field(default_factory=BackendConfig)
     local_api: LocalApiConfig = Field(default_factory=LocalApiConfig)
-    vision_driver: Literal["mock"] = "mock"
+    camera: CameraConfig = Field(default_factory=CameraConfig)
+    vision_driver: Literal["mock", "camera"] = "mock"   # camera = real QR reading, inspection still simulated
     backend_driver: Literal["mock", "http"] = "mock"
     customer_driver: Literal["auto", "web"] = "auto"
 
