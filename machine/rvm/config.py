@@ -11,7 +11,7 @@ class PLCConfig(BaseModel):
     host: str = "127.0.0.1"
     port: int = 502
     device_id: int = 1
-    lanes: int = Field(default=3, ge=1, le=3)   # bottle inlets on this machine
+    lanes: int = Field(default=1, ge=1, le=3)   # bottle inlets: 1 for now (one hole, camera, sensors); up to 3 supported
     write_base: int = 0
     read_base: int = 100
     poll_interval_s: float = 0.1

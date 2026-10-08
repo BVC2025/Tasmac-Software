@@ -21,7 +21,7 @@ def fast_config(port: int) -> MachineConfig:
     return MachineConfig(
         plc=PLCConfig(
             port=port, poll_interval_s=0.02, heartbeat_interval_s=0.1,
-            plc_heartbeat_timeout_s=1.0, default_cmd_timeout_s=3.0,
+            plc_heartbeat_timeout_s=1.0, default_cmd_timeout_s=3.0, lanes=3,   # tests cover the 3-inlet design too
         ),
         simulator=SimulatorConfig(enabled=True, time_scale=0.05),
         session_log_path=":memory:",
