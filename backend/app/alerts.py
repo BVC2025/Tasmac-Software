@@ -5,7 +5,7 @@ by `evaluate_alerts`, which runs in the background loop. Manual alerts (a paid
 bottle that went back to the customer) stay open until an operator resolves them.
 """
 
-from datetime import timedelta
+from datetime import timedelta, timezone
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -38,14 +38,29 @@ async def clear_alert(db: AsyncSession, type_: AlertType, entity_id: str) -> Non
     ).values(status="RESOLVED", resolved_at=utcnow(), resolved_by="system", note="Condition cleared"))
 
 
+MACHINE_ALERTS = (AlertType.MACHINE_OFFLINE, AlertType.MACHINE_FAULT, AlertType.BIN_FULL)
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+def ist(t) -> str:
+    return f"{t.astimezone(IST):%d %b %H:%M} IST"
+
+
 async def evaluate_alerts(db: AsyncSession) -> None:
     s = get_settings()
     now = utcnow()
+    # a disabled machine is not expected to report: close its automatic alerts
+    disabled = (await db.execute(select(Machine.id).where(Machine.active.is_(False)))).scalars().all()
+    if disabled:
+        await db.execute(update(Alert).where(
+            Alert.type.in_(MACHINE_ALERTS), Alert.entity_id.in_(disabled), Alert.status == "OPEN", Alert.auto.is_(True),
+        ).values(status="RESOLVED", resolved_at=now, resolved_by="system", note="Machine disabled"))
+
     machines = (await db.execute(select(Machine).where(Machine.active.is_(True)))).scalars().all()
     for m in machines:
         offline = m.last_seen_at is None or m.last_seen_at < now - timedelta(seconds=s.machine_offline_after_s)
         if offline and m.last_seen_at is not None:
-            await raise_alert(db, AlertType.MACHINE_OFFLINE, m.id, f"{m.id} has not reported since {m.last_seen_at:%d %b %H:%M} UTC", m.id)
+            await raise_alert(db, AlertType.MACHINE_OFFLINE, m.id, f"{m.id} has not reported since {ist(m.last_seen_at)}", m.id)
         elif not offline:
             await clear_alert(db, AlertType.MACHINE_OFFLINE, m.id)
 
@@ -64,7 +79,7 @@ async def evaluate_alerts(db: AsyncSession) -> None:
     stuck = (await db.execute(select(Transaction).where(
         Transaction.status == TxnStatus.PENDING, Transaction.created_at < stuck_before))).scalars().all()
     for t in stuck:
-        await raise_alert(db, AlertType.PAYOUT_STUCK, t.id, f"Payout {t.id} pending since {t.created_at:%d %b %H:%M} UTC", t.machine_id)
+        await raise_alert(db, AlertType.PAYOUT_STUCK, t.id, f"Payout {t.id} pending since {ist(t.created_at)}", t.machine_id)
     open_stuck = (await db.execute(select(Alert.entity_id).where(
         Alert.type == AlertType.PAYOUT_STUCK, Alert.status == "OPEN"))).scalars().all()
     for txn_id in open_stuck:

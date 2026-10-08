@@ -126,6 +126,23 @@ async def test_machine_offline_alert(client, operator_h, machine):
     assert types == ["MACHINE_OFFLINE"]
 
 
+async def test_disabling_machine_closes_its_alerts(client, operator_h, machine):
+    await machine.post("/heartbeat", {"state": "READY"})
+    async with SessionLocal() as db:
+        await db.execute(update(Machine).where(Machine.id == "RVM-T1")
+                         .values(last_seen_at=utcnow() - timedelta(minutes=10)))
+        await db.commit()
+        await evaluate_alerts(db)
+    alert = (await client.get(f"{API}/alerts", headers=operator_h)).json()[0]
+    assert "IST" in alert["message"]
+    await client.patch(f"{API}/machines/RVM-T1", headers=operator_h, json={"active": False})
+    async with SessionLocal() as db:
+        await evaluate_alerts(db)
+    assert (await client.get(f"{API}/alerts", headers=operator_h)).json() == []
+    closed = (await client.get(f"{API}/alerts?status=RESOLVED", headers=operator_h)).json()
+    assert [(a["type"], a["note"]) for a in closed] == [("MACHINE_OFFLINE", "Machine disabled")]
+
+
 async def test_paid_bottle_returned_manual_alert(client, machine, operator_h, viewer_h):
     txn = await machine.full_refund("s1", refund_qr(), mfg_qr())
     await machine.post("/sessions/s1/returned", {"reason": "PAYOUT_PENDING"})
