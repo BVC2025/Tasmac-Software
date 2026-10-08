@@ -1,8 +1,8 @@
 import jsQR from 'jsqr'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import { Banner, Button } from '../components/ui'
-import { CheckIcon, QrIcon } from '../components/Icons'
+import { Banner, Button, ScanFrame, Spinner, StatusBadge } from '../components/ui'
+import { ArrowRightIcon, CheckIcon, QrIcon } from '../components/Icons'
 import { useLang } from '../i18n'
 import { videoConstraints } from '../lib/camera'
 import { parseUpiQr, type UpiTarget } from '../lib/upi'
@@ -137,20 +137,21 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
 
   if (found) {
     return (
-      <div className="flex w-full flex-col items-center gap-6">
-        <div className="flex h-24 w-24 items-center justify-center rounded-full bg-brand-600 text-white">
-          <CheckIcon className="h-14 w-14" strokeWidth={3} />
-        </div>
-        <p className="text-xl text-slate-600">{t.qrFound}</p>
-        <div className="w-full rounded-2xl bg-white p-6 text-center shadow ring-1 ring-slate-200">
-          <p className="break-all text-3xl font-bold text-brand-900">{found.vpa}</p>
+      <div className="flex w-full flex-col items-center">
+        <StatusBadge size="md"><CheckIcon className="h-14 w-14" strokeWidth={3} /></StatusBadge>
+        <p className="mb-6 text-3xl font-extrabold text-brand-900">{t.upiDetected}</p>
+        <div className="w-full rounded-3xl bg-white px-8 py-6 text-center shadow-sm ring-1 ring-slate-200">
+          <p className="text-lg text-slate-500">UPI ID</p>
+          <p className="mt-1 text-3xl font-bold break-all text-brand-900">{found.vpa}</p>
           {found.name && <p className="mt-2 text-xl text-slate-600">{found.name}</p>}
         </div>
-        <div className="grid w-full grid-cols-2 gap-4">
+        <div className="mt-8 grid w-full grid-cols-3 gap-4">
           <Button variant="secondary" onClick={() => setFound(null)}>
-            {t.scanAgain}
+            {t.change}
           </Button>
-          <Button onClick={() => onResult(found)}>{t.useThis}</Button>
+          <Button className="col-span-2" onClick={() => onResult(found)}>
+            {t.next} <ArrowRightIcon className="h-7 w-7" />
+          </Button>
         </div>
       </div>
     )
@@ -159,7 +160,7 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
   return (
     <div className="flex w-full flex-col items-center gap-6">
       <p className="text-center text-xl text-slate-600">{t.qrSub}</p>
-      <div className="relative aspect-[4/3] w-full max-w-lg overflow-hidden rounded-3xl bg-slate-900">
+      <ScanFrame scanning={camera === 'on'}>
         {source === 'machine' ? (
           frame && <img src={frame} alt="" className="h-full w-full -scale-x-100 object-cover" />
         ) : (
@@ -171,8 +172,12 @@ export function QrScan({ onResult }: { onResult: (t: UpiTarget) => void }) {
             {camera === 'off' && <p className="text-lg">{t.qrNoCamera}</p>}
           </div>
         )}
-        <div className="pointer-events-none absolute inset-10 rounded-2xl border-4 border-dashed border-white/70" />
-      </div>
+      </ScanFrame>
+      {camera === 'on' && (
+        <p className="flex items-center gap-3 text-lg text-slate-600">
+          <Spinner className="h-6 w-6" thin /> {t.scanning}
+        </p>
+      )}
       {invalid && <Banner tone="error">{t.qrInvalid}</Banner>}
     </div>
   )

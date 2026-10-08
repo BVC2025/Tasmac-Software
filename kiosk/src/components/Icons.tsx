@@ -89,3 +89,34 @@ export const SpeakerOffIcon = (p: P) => (
     <path d="M11 5 6 9H2v6h4l5 4zM22 9l-6 6M16 9l6 6" />
   </svg>
 )
+export const ArrowRightIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M5 12h14M13 6l6 6-6 6" />
+  </svg>
+)
+export const WifiIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M2 8.8a15 15 0 0 1 20 0M5.5 12.4a10 10 0 0 1 13 0M9 16a5 5 0 0 1 6 0M12 19.5h.01" />
+  </svg>
+)
+export const WifiOffIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M2 2l20 20M8.5 4.6A15 15 0 0 1 22 8.8M2 8.8a15 15 0 0 1 3.2-2.3M5.5 12.4a10 10 0 0 1 4.3-2.3M9 16a5 5 0 0 1 6 0M12 19.5h.01" />
+  </svg>
+)
+export const HourglassIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M6 2h12M6 22h12M7 2v4a5 5 0 0 0 10 0V2M7 22v-4a5 5 0 0 1 10 0v4" />
+  </svg>
+)
+export const LeafIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M4 20c0-9 6-15 16-16-1 10-7 16-16 16zM4 20l8-8" />
+  </svg>
+)
+export const CameraIcon = (p: P) => (
+  <svg {...base(p)}>
+    <path d="M3 8a2 2 0 0 1 2-2h2.5l1.5-2h6l1.5 2H19a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    <circle cx="12" cy="13" r="3.5" />
+  </svg>
+)

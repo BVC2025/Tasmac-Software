@@ -211,8 +211,10 @@ async def verify_mfg_qr(db: AsyncSession, machine: Machine, session_id: str, raw
         _reject(b, "BOTTLE_ALREADY_RETURNED")
         await db.commit()
         return Verdict(False, "BOTTLE_ALREADY_RETURNED")
+    brand = await db.get(EligibleBrand, m.brand) if m.brand else None
     await db.commit()
-    return Verdict(True, data={"brand": m.brand, "batch": m.batch, "serial": m.serial})
+    return Verdict(True, data={"brand": m.brand, "brand_name": brand.name if brand else None,
+                               "batch": m.batch, "serial": m.serial})
 
 
 async def _eligibility_rejected(db: AsyncSession, machine: Machine, session_id: str, lane: int, reason: str) -> Verdict:

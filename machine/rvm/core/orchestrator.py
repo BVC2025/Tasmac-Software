@@ -72,6 +72,7 @@ class Bottle:
     refund_qr: str | None = None
     mfg_qr: str | None = None
     amount_paise: int = 0
+    brand: str | None = None    # from the manufacturing QR (shown on the kiosk)
     reason: str = ""
     handed_back: bool = False   # physically returned to the inlet
 
@@ -384,9 +385,10 @@ class Orchestrator:
             v = await self._backend_or_lane_reject(self.backend.verify_mfg_qr(session.id, b.mfg_qr, ln))
             if not v.ok:
                 raise LaneRejected(v.reason)
+            b.brand = v.data.get("brand_name") or v.data.get("brand")
 
             # eligibility reserves the refund QR on the server for this session + lane
-            self._lane_step(b, LaneStep.VERIFYING)
+            self._lane_step(b, LaneStep.VERIFYING, brand=b.brand)
             v = await self._backend_or_lane_reject(
                 self.backend.check_eligibility(session.id, b.refund_qr, b.mfg_qr, ln))
             if not v.ok:
@@ -394,7 +396,7 @@ class Orchestrator:
             b.amount_paise = int(v.data.get("amount_paise", REFUND_AMOUNT_PAISE))
             await self.plc.command(Cmd.LIGHT_OFF, lane=ln)
             await self.plc.command(Cmd.MOVE_TO_HOLD, lane=ln)
-            self._lane_step(b, LaneStep.VALID, amount_paise=b.amount_paise)
+            self._lane_step(b, LaneStep.VALID, amount_paise=b.amount_paise, brand=b.brand)
 
         except LaneRejected as r:
             b.reason = r.reason

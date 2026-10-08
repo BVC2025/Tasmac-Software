@@ -16,6 +16,7 @@
   --color-brand-500: #198754;
   --color-brand-600: #146c43;
   --color-brand-700: #0f5132;
+  --color-brand-800: #0b4228;
   --color-brand-900: #072b1b;
   --color-accent: #f5a524;
 }
@@ -128,4 +129,35 @@ body {
 @media (prefers-reduced-motion: reduce) {
   .ia-bottle, .ia-arrow, .ia-brackets, .ia-sweep, .ia-ring-glow { animation: none; }
   .ia-sweep, .ia-ring-glow { opacity: 0; }
+}
+
+/* ---- redesign: scan frame line, indeterminate progress, voice wave ---- */
+@keyframes scan-line {
+  0% { top: 8%; }
+  50% { top: 88%; }
+  100% { top: 8%; }
+}
+.animate-scan-line { animation: scan-line 2.4s ease-in-out infinite; }
+
+@keyframes progress-slide {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(250%); }
+}
+.animate-progress { animation: progress-slide 1.6s ease-in-out infinite; }
+
+@keyframes wave {
+  0%, 100% { transform: scaleY(0.3); }
+  50% { transform: scaleY(1); }
+}
+.animate-wave { animation: wave 0.9s ease-in-out infinite; transform-origin: center; }
+
+@keyframes pop-in {
+  0% { transform: scale(0.6); opacity: 0; }
+  70% { transform: scale(1.06); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.animate-pop { animation: pop-in 0.45s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-scan-line, .animate-progress, .animate-wave, .animate-pop { animation: none; }
 }

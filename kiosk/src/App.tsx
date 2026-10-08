@@ -1,10 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Clock } from './components/Clock'
 import { DevPanel } from './components/DevPanel'
-import { BottleIcon, SpeakerIcon, SpeakerOffIcon } from './components/Icons'
+import { SpeakerIcon, SpeakerOffIcon, WifiIcon, WifiOffIcon } from './components/Icons'
 import { LangProvider, useLang } from './i18n'
 import { Confirm, RefundMethod, Result } from './screens/RefundFlow'
-import { Checking, Connecting, isCheckingState, OutOfService, Paying, Ready, Rejecting, Starting } from './screens/StatusScreens'
+import { Checking, Connecting, isCheckingState, OutOfService, Paying, Ready, Rejecting, Starting, Welcome } from './screens/StatusScreens'
 import { useMachine, type MachineView } from './useMachine'
 import { cueFor, rejectClip, useVoice, VoiceProvider } from './voice'
 
@@ -15,7 +15,7 @@ function VoiceToggle() {
     <button
       onClick={toggle}
       aria-label={enabled ? 'Mute voice' : 'Unmute voice'}
-      className={`relative flex h-14 w-14 items-center justify-center rounded-full ${enabled ? 'bg-white/15' : 'bg-white/5 text-white/60'}`}
+      className={`relative flex h-12 w-12 items-center justify-center rounded-full ${enabled ? 'bg-white/15' : 'bg-white/5 text-white/60'}`}
     >
       {enabled ? <SpeakerIcon className="h-7 w-7" /> : <SpeakerOffIcon className="h-7 w-7" />}
       {enabled && blocked && <span className="absolute top-2 right-2 h-3 w-3 animate-pulse rounded-full bg-accent" />}
@@ -26,41 +26,46 @@ function VoiceToggle() {
 function Header({ view }: { view: MachineView }) {
   const { t, lang, setLang } = useLang()
   return (
-    <header className="flex items-center justify-between gap-4 bg-brand-700 px-6 py-4 text-white shadow">
+    <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 bg-brand-800 px-6 py-3 text-white shadow-lg">
       <div className="flex items-center gap-3">
-        <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15">
-          <BottleIcon className="h-8 w-8" />
+        <span title={view.connected ? 'Online' : 'Offline'} className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10">
+          {view.connected ? <WifiIcon className="h-7 w-7 text-emerald-300" /> : <WifiOffIcon className="h-7 w-7 text-red-300" />}
         </span>
-        <div>
-          <p className="text-2xl leading-tight font-extrabold">{t.appTitle}</p>
-          <p className="text-sm opacity-80">TASMAC · {view.machineId || '—'}</p>
+        <VoiceToggle />
+      </div>
+      <div className="text-center">
+        <p className="text-3xl leading-none font-extrabold tracking-[0.18em]">TASMAC</p>
+        <p className="mt-1 text-sm opacity-75">
+          {t.appTitle} · {view.machineId || '—'}
+        </p>
+      </div>
+      <div className="flex items-center justify-end gap-4">
+        <div className="flex rounded-full bg-white/15 p-1">
+          {(['ta', 'en'] as const).map((l) => (
+            <button
+              key={l}
+              onClick={() => setLang(l)}
+              className={`min-h-11 rounded-full px-4 text-base font-semibold ${lang === l ? 'bg-white text-brand-700' : 'text-white'}`}
+            >
+              {l === 'ta' ? 'தமிழ்' : 'English'}
+            </button>
+          ))}
         </div>
-      </div>
-      <Clock />
-      <div className="flex items-center gap-3">
-      <VoiceToggle />
-      <div className="flex rounded-full bg-white/15 p-1">
-        {(['ta', 'en'] as const).map((l) => (
-          <button
-            key={l}
-            onClick={() => setLang(l)}
-            className={`min-h-12 rounded-full px-5 text-lg font-semibold ${lang === l ? 'bg-white text-brand-700' : 'text-white'}`}
-          >
-            {l === 'ta' ? 'தமிழ்' : 'English'}
-          </button>
-        ))}
-      </div>
+        <Clock className="text-right" />
       </div>
     </header>
   )
 }
 
-function Body({ view, clearResult }: { view: MachineView; clearResult: () => void }) {
+function Body({ view, clearResult, welcome, onStart }: {
+  view: MachineView; clearResult: () => void; welcome: boolean; onStart: () => void
+}) {
   const s = view.state
   if (!view.connected) return <Connecting />
+  if (welcome) return <Welcome onStart={onStart} />
   if (s === 'OUT_OF_SERVICE') return <OutOfService reason={view.fault ?? view.stateData.reason} showReason={view.simulation} />
   // Hold the outcome screen for a few seconds after the session ends
-  if (view.result && (s === 'READY' || s === 'REJECTING')) return <Result result={view.result} onDone={clearResult} />
+  if (view.result && (s === 'READY' || s === 'REJECTING')) return <Result result={view.result} confirm={view.confirm} onDone={clearResult} />
   if (s === 'STARTING' || s === 'HEALTH_CHECK') return <Starting />
   if (s === 'READY') return <Ready lanes={view.laneCount} />
   if (isCheckingState(s)) return <Checking view={view} />
@@ -78,7 +83,12 @@ function Kiosk() {
 
   const voice = useVoice()
 
-  // Back to Tamil for the next customer (silently: the old prompt must not replay)
+  // Welcome screen until the customer taps Start (a bottle in the inlet skips it)
+  const [started, setStarted] = useState(false)
+  const welcome = view.state === 'READY' && !view.result && !started
+
+  // Back to Tamil and the welcome screen for the next customer
+  // (silently: the old prompt must not replay)
   const hadResult = useRef(false)
   useEffect(() => {
     if (view.result) hadResult.current = true
@@ -86,13 +96,21 @@ function Kiosk() {
       hadResult.current = false
       voice.forget()
       setLang('ta')
+      setStarted(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view.result, setLang])
 
+  // Nobody inserted a bottle after Start: back to the welcome screen
+  useEffect(() => {
+    if (!started || view.state !== 'READY') return
+    const id = window.setTimeout(() => setStarted(false), 90_000)
+    return () => window.clearTimeout(id)
+  }, [started, view.state, view.stateAt])
+
   // Spoken guidance: one clip per new instruction, in the selected language.
   // Played a tick later so a language reset in the same update is applied first.
-  const cue = cueFor(view)
+  const cue = welcome ? null : cueFor(view)
   const cueKey = cue?.key
   const cueClip = cue?.clip
   const cueQueue = cue?.queue
@@ -121,7 +139,7 @@ function Kiosk() {
     <div className="flex h-full flex-col">
       <Header view={view} />
       <main className="flex flex-1 flex-col overflow-y-auto">
-        <Body view={view} clearResult={clearResult} />
+        <Body view={view} clearResult={clearResult} welcome={welcome} onStart={() => setStarted(true)} />
       </main>
       {view.simulation && <DevPanel view={view} />}
     </div>

@@ -8,6 +8,7 @@ export interface LaneView {
   step: string // DETECTED .. VERIFYING | VALID | REJECTED | ACCEPTED | RETURNED
   reason?: string | null
   amount_paise?: number
+  brand?: string | null // from the manufacturing QR
 }
 
 export interface SessionResult {
@@ -94,7 +95,13 @@ function reducer(s: MachineView, a: Action): MachineView {
       // new customer session: forget everything from the previous one
       return { ...s, lanes: {}, confirm: null, inputError: null, final: null, result: null, fault: null }
     case 'lane':
-      return { ...s, lanes: { ...s.lanes, [ev.lane]: { lane: ev.lane, step: ev.step, reason: ev.reason, amount_paise: ev.amount_paise } } }
+      return {
+        ...s,
+        lanes: {
+          ...s.lanes,
+          [ev.lane]: { lane: ev.lane, step: ev.step, reason: ev.reason, amount_paise: ev.amount_paise, brand: ev.brand ?? s.lanes[ev.lane]?.brand },
+        },
+      }
     case 'session_ended':
       return {
         ...s,

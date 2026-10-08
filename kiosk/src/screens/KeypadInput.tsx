@@ -39,7 +39,7 @@ export function KeypadInput({ onResult }: { onResult: (v: KeypadValue) => void }
           <button
             key={k}
             onClick={() => setTab(k)}
-            className={`h-14 rounded-xl text-xl font-semibold ${tab === k ? 'bg-white text-brand-700 shadow' : 'text-slate-600'}`}
+            className={`h-14 rounded-xl text-xl font-semibold ${tab === k ? 'bg-brand-600 text-white shadow' : 'text-slate-600'}`}
           >
             {k === 'mobile' ? t.tabMobile : t.tabUpi}
           </button>

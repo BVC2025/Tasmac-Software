@@ -1,11 +1,13 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api, type InputSource } from '../api'
-import { Banner, Button, Countdown, Screen, Spinner, Title } from '../components/ui'
-import { ArrowLeftIcon, CheckIcon, ClockIcon, KeypadIcon, MicIcon, QrIcon, SmsIcon } from '../components/Icons'
+import { Banner, Button, Countdown, DetailCard, Screen, Spinner, StatusBadge, Title } from '../components/ui'
+import {
+  ArrowLeftIcon, ArrowRightIcon, BottleIcon, CheckIcon, HourglassIcon, KeypadIcon, LeafIcon, MicIcon, QrIcon, SmsIcon, XIcon,
+} from '../components/Icons'
 import { useLang } from '../i18n'
 import { normalizeMobile } from '../lib/upi'
 import { useVoice } from '../voice'
-import type { MachineView, SessionResult } from '../useMachine'
+import type { Ev, MachineView, SessionResult } from '../useMachine'
 import { KeypadInput, SmsMobileStep } from './KeypadInput'
 import { BatchSummary, rupees as toRupees } from './StatusScreens'
 import { QrScan } from './QrScan'
@@ -53,8 +55,10 @@ export function RefundMethod({ view }: { view: MachineView }) {
     setStep('sms')
   }
 
+  const amount = toRupees(view.stateData.amount_paise ?? 1000)
+  const lanes = Object.values(view.lanes).sort((x, y) => x.lane - y.lane)
   const header: Record<Step, string> = {
-    choose: t.chooseTitle(toRupees(view.stateData.amount_paise ?? 1000)),
+    choose: t.chooseMethodTitle,
     qr: t.qrTitle,
     voice: t.voiceTitle,
     keypad: t.keypadTitle,
@@ -70,10 +74,10 @@ export function RefundMethod({ view }: { view: MachineView }) {
     )
   } else if (step === 'choose') {
     body = (
-      <div className="grid w-full gap-4">
-        <MethodCard icon={<QrIcon className="h-12 w-12" />} title={t.methodQr} sub={t.methodQrSub} onClick={() => setStep('qr')} />
-        <MethodCard icon={<MicIcon className="h-12 w-12" />} title={t.methodVoice} sub={t.methodVoiceSub} onClick={() => setStep('voice')} />
-        <MethodCard icon={<KeypadIcon className="h-12 w-12" />} title={t.methodKeypad} sub={t.methodKeypadSub} onClick={() => setStep('keypad')} />
+      <div className="grid w-full grid-cols-1 gap-4 sm:grid-cols-3">
+        <MethodCard icon={<QrIcon className="h-14 w-14" />} title={t.methodQr} sub={t.methodQrSub} onClick={() => setStep('qr')} />
+        <MethodCard icon={<MicIcon className="h-14 w-14" />} title={t.methodVoice} sub={t.methodVoiceSub} onClick={() => setStep('voice')} />
+        <MethodCard icon={<KeypadIcon className="h-14 w-14" />} title={t.methodKeypad} sub={t.methodKeypadSub} onClick={() => setStep('keypad')} />
       </div>
     )
   } else if (step === 'qr') {
@@ -94,17 +98,19 @@ export function RefundMethod({ view }: { view: MachineView }) {
             <ArrowLeftIcon className="h-6 w-6" /> {t.back}
           </Button>
         ) : (
-          <span className="rounded-full bg-brand-50 px-4 py-1.5 text-lg font-semibold text-brand-700 ring-1 ring-brand-100">
-            {t.eligible(view.stateData.bottle_count ?? 1, toRupees(view.stateData.amount_paise ?? 1000))}
+          <span className="inline-flex items-center gap-2 rounded-full bg-brand-50 px-4 py-1.5 text-lg font-semibold text-brand-700 ring-1 ring-brand-100">
+            <CheckIcon className="h-5 w-5" strokeWidth={3} />
+            {t.eligible(view.stateData.bottle_count ?? 1, amount)}
+            {lanes.length === 1 && lanes[0].brand && <span className="font-normal text-slate-600">· {lanes[0].brand}</span>}
           </span>
         )}
         <Countdown seconds={view.stateData.timeout_s} since={view.stateAt} />
       </div>
 
-      <Title>{header[step]}</Title>
-      {step === 'choose' && Object.keys(view.lanes).length > 1 && (
+      <Title sub={step === 'choose' ? t.creditedSub(amount) : undefined}>{header[step]}</Title>
+      {step === 'choose' && lanes.length > 1 && (
         <div className="-mt-4 mb-6 w-full">
-          <BatchSummary lanes={Object.values(view.lanes).sort((x, y) => x.lane - y.lane)} />
+          <BatchSummary lanes={lanes} />
         </div>
       )}
 
@@ -136,12 +142,12 @@ function MethodCard({ icon, title, sub, onClick }: { icon: ReactNode; title: str
   return (
     <button
       onClick={onClick}
-      className="flex w-full items-center gap-6 rounded-3xl bg-white p-6 text-left shadow-sm ring-1 ring-slate-200 transition active:scale-[0.99] active:ring-2 active:ring-brand-500"
+      className="flex w-full items-center gap-6 rounded-3xl bg-white p-6 text-left shadow-sm ring-2 ring-slate-200 transition active:scale-[0.98] active:ring-brand-500 sm:flex-col sm:gap-4 sm:px-4 sm:py-8 sm:text-center"
     >
-      <span className="flex h-20 w-20 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700">{icon}</span>
+      <span className="flex h-24 w-24 shrink-0 items-center justify-center rounded-2xl bg-brand-50 text-brand-700 ring-1 ring-brand-100">{icon}</span>
       <span>
         <span className="block text-2xl font-bold text-brand-900">{title}</span>
-        <span className="mt-1 block text-lg text-slate-500">{sub}</span>
+        <span className="mt-2 block text-lg leading-snug text-slate-500">{sub}</span>
       </span>
     </button>
   )
@@ -161,94 +167,101 @@ export function Confirm({ view }: { view: MachineView }) {
   }
   if (!c) return null
   const rupees = (c.amount_paise / 100).toFixed(0)
+  const rows: [ReactNode, ReactNode][] = [
+    [t.amount, <span key="amount" className="text-3xl text-brand-700">₹{rupees}</span>],
+    ...(c.bottle_count > 1 ? [[t.bottleCount, String(c.bottle_count)] as [ReactNode, ReactNode]] : []),
+    [t.refundTo, c.destination],
+    ...(c.name ? [[t.accountName, c.name] as [ReactNode, ReactNode]] : []),
+    [t.method, c.kind === 'mobile' ? t.methodMobile : t.methodUpiId],
+    ...(c.sms_mobile
+      ? [[<span key="sms" className="inline-flex items-center gap-2"><SmsIcon className="h-5 w-5" />{t.smsTo}</span>, c.sms_mobile] as [ReactNode, ReactNode]]
+      : []),
+  ]
   return (
-    <Screen>
+    <Screen className="justify-center">
       <div className="mb-6 flex w-full justify-end">
         <Countdown seconds={view.stateData.timeout_s} since={view.stateAt} />
       </div>
-      <Title>{t.confirmTitle}</Title>
-      <div className="w-full overflow-hidden rounded-3xl bg-white shadow ring-1 ring-slate-200">
-        <div className="bg-brand-700 px-8 py-8 text-center text-white">
-          <p className="text-lg opacity-80">{t.amount}</p>
-          <p className="text-7xl font-extrabold">₹{rupees}</p>
-        </div>
-        <dl className="divide-y divide-slate-100 text-xl">
-          {c.bottle_count > 1 && <Row label={t.bottleCount} value={String(c.bottle_count)} />}
-          <Row label={t.sendTo} value={c.destination} />
-          {c.name && <Row label={t.accountName} value={c.name} />}
-          {c.sms_mobile && <Row label={t.smsTo} value={c.sms_mobile} icon={<SmsIcon className="h-5 w-5" />} />}
-        </dl>
-      </div>
+      <Title sub={t.confirmProceed}>{t.refundDetails}</Title>
+      <DetailCard rows={rows} />
       <div className="mt-8 grid w-full grid-cols-3 gap-4">
-        <Button variant="secondary" disabled={busy} onClick={() => send(false)}>
-          {t.change}
-        </Button>
         <Button className="col-span-2" disabled={busy} onClick={() => send(true)}>
           <CheckIcon className="h-7 w-7" strokeWidth={3} /> {t.confirm(rupees)}
+        </Button>
+        <Button variant="secondary" disabled={busy} onClick={() => send(false)}>
+          {t.change}
         </Button>
       </div>
     </Screen>
   )
 }
 
-function Row({ label, value, icon }: { label: string; value: string; icon?: ReactNode }) {
-  return (
-    <div className="flex items-center justify-between gap-4 px-8 py-5">
-      <dt className="flex items-center gap-2 text-slate-500">
-        {icon}
-        {label}
-      </dt>
-      <dd className="break-all text-right font-bold text-brand-900">{value}</dd>
-    </div>
-  )
-}
+const istTime = (ms: number) =>
+  new Date(ms).toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit', hour12: true }).toUpperCase()
 
-export function Result({ result, onDone }: { result: SessionResult; onDone: () => void }) {
+export function Result({ result, confirm, onDone }: { result: SessionResult; confirm: Ev | null; onDone: () => void }) {
   const { t, reason } = useLang()
-  const success = result.outcome === 'ACCEPTED' && result.final?.code !== 'REFUND_PENDING'
   const pending = result.outcome === 'ACCEPTED' && result.final?.code === 'REFUND_PENDING'
+  const success = result.outcome === 'ACCEPTED' && !pending
+  const amount = toRupees(result.amount_paise || 1000)
+  const accepted = result.accepted || 1
 
+  if (success) {
+    const rows: [ReactNode, ReactNode][] = [
+      ...(result.txn_id ? [[t.txnId, <span key="txn" className="font-mono text-lg">{result.txn_id}</span>] as [ReactNode, ReactNode]] : []),
+      ...(confirm?.destination ? [[t.refundTo, confirm.destination] as [ReactNode, ReactNode]] : []),
+      [t.time, istTime(result.at)],
+    ]
+    return (
+      <Screen className="justify-center">
+        <StatusBadge><CheckIcon className="h-20 w-20" strokeWidth={3} /></StatusBadge>
+        <Title sub={t.creditedDone}>{t.successTitle(amount)}</Title>
+        <DetailCard rows={rows} />
+        <div className="mt-6 grid w-full gap-3 sm:grid-cols-2">
+          <p className="flex items-center gap-3 rounded-2xl bg-brand-50 px-5 py-4 text-lg font-semibold text-brand-800 ring-1 ring-brand-100">
+            <BottleIcon className="h-7 w-7" /> {t.bottlesAccepted(accepted)}
+          </p>
+          {result.sms && (
+            <p className="flex items-center gap-3 rounded-2xl bg-brand-50 px-5 py-4 text-lg font-semibold text-brand-800 ring-1 ring-brand-100">
+              <SmsIcon className="h-7 w-7" /> {t.smsSent}
+            </p>
+          )}
+        </div>
+        {result.bottles.length > 1 && result.accepted < result.bottles.length && (
+          <div className="mt-4 w-full"><BatchSummary lanes={result.bottles} /></div>
+        )}
+        <p className="mt-8 flex items-center gap-2 text-xl text-slate-600"><LeafIcon className="h-6 w-6 text-brand-600" /> {t.successSub}</p>
+        <Button className="mt-8 w-full max-w-md" onClick={onDone}>{t.done}</Button>
+      </Screen>
+    )
+  }
+
+  if (pending) {
+    return (
+      <Screen className="justify-center">
+        <StatusBadge tone="warn"><HourglassIcon className="h-20 w-20" /></StatusBadge>
+        <Title sub={t.pendingNote}>{t.paymentProcessing}</Title>
+        <p className="mb-2 text-xl font-semibold text-brand-800">{t.pendingSub(amount)}</p>
+        {result.txn_id && <p className="mt-2 rounded-lg bg-slate-200/70 px-4 py-2 font-mono text-lg text-slate-700">{t.txnId}: {result.txn_id}</p>}
+        <Button variant="secondary" className="mt-10 w-full max-w-md" onClick={onDone}>{t.backHome}</Button>
+      </Screen>
+    )
+  }
+
+  const failed = result.reason === 'PAYOUT_FAILED'
   return (
     <Screen className="justify-center">
-      {success || pending ? (
-        <>
-          <div className={`mb-8 flex h-40 w-40 items-center justify-center rounded-full ${success ? 'bg-brand-600' : 'bg-amber-500'} text-white shadow-lg`}>
-            {success ? <CheckIcon className="h-24 w-24" strokeWidth={3} /> : <ClockIcon className="h-24 w-24" />}
-          </div>
-          <Title sub={success ? t.successSub : t.pendingSub(toRupees(result.amount_paise || 1000))}>
-            {success ? t.successTitle(toRupees(result.amount_paise || 1000)) : t.pendingTitle}
-          </Title>
-          {result.bottles.length > 1 && (
-            <div className="mb-4 w-full space-y-3 text-center">
-              <p className="text-xl font-semibold text-slate-700">
-                {t.resultCounts(result.accepted, result.bottles.length - result.accepted)}
-              </p>
-              <BatchSummary lanes={result.bottles} />
-            </div>
-          )}
-          {result.sms && (
-            <p className="flex items-center gap-2 text-xl text-slate-600">
-              <SmsIcon className="h-6 w-6" /> {t.smsNote}
-            </p>
-          )}
-          {result.txn_id && (
-            <p className="mt-4 rounded-lg bg-slate-200/70 px-4 py-2 font-mono text-lg text-slate-700">
-              {t.reference}: {result.txn_id}
-            </p>
-          )}
-        </>
-      ) : (
-        <>
-          <div className="mb-8 flex h-36 w-36 items-center justify-center rounded-full bg-slate-200 text-slate-600">
-            <ArrowLeftIcon className="h-20 w-20" />
-          </div>
-          <Title sub={reason(result.reason)}>
-            {result.reason === 'CUSTOMER_CANCELLED' ? t.cancelledTitle : t.returnedTitle}
-          </Title>
-        </>
-      )}
-      <Button variant="secondary" className="mt-10 w-64" onClick={onDone}>
-        {t.done}
+      <StatusBadge tone={failed ? 'error' : 'muted'}>
+        {failed ? <XIcon className="h-20 w-20" strokeWidth={3} /> : <ArrowLeftIcon className="h-20 w-20" />}
+      </StatusBadge>
+      <Title sub={failed ? t.refundFailedSub : reason(result.reason)}>
+        {failed ? t.refundFailed : result.reason === 'CUSTOMER_CANCELLED' ? t.cancelledTitle : t.returnedTitle}
+      </Title>
+      {result.bottles.length > 1 && <div className="mb-4 w-full"><BatchSummary lanes={result.bottles} /></div>}
+      {result.txn_id && <p className="mb-4 rounded-lg bg-slate-200/70 px-4 py-2 font-mono text-lg text-slate-700">{t.txnId}: {result.txn_id}</p>}
+      {failed && <p className="mt-2 rounded-2xl bg-red-600 px-8 py-4 text-xl font-bold text-white shadow">{t.contactStaff}</p>}
+      <Button variant="secondary" className="mt-10 w-full max-w-md" onClick={onDone}>
+        {t.backHome} <ArrowRightIcon className="h-6 w-6" />
       </Button>
     </Screen>
   )

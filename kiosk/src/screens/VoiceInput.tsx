@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Banner, Button } from '../components/ui'
 import { DigitDisplay } from '../components/Keypads'
-import { MicIcon } from '../components/Icons'
+import { CheckIcon, MicIcon } from '../components/Icons'
 import { useLang } from '../i18n'
 import { spokenToDigits } from '../lib/speechNumbers'
 import { normalizeMobile } from '../lib/upi'
@@ -115,7 +115,17 @@ export function VoiceInput({ onResult, onTypeInstead }: { onResult: (mobile: str
         {listening && <span className="animate-pulse-ring absolute inset-0 rounded-full bg-brand-500/50" />}
         <MicIcon className="relative h-16 w-16" />
       </button>
+      <div className="flex h-14 items-center gap-1.5" aria-hidden>
+        {Array.from({ length: 21 }, (_, i) => (
+          <span
+            key={i}
+            className={`w-1.5 rounded-full bg-brand-500 ${listening ? 'animate-wave' : 'opacity-30'}`}
+            style={{ height: `${30 + ((i * 37) % 70)}%`, animationDelay: `${(i % 7) * 0.09}s` }}
+          />
+        ))}
+      </div>
       <p className="text-lg font-semibold text-brand-700">{listening ? t.voiceListening : t.voiceTapToSpeak}</p>
+      {!mobile && <p className="rounded-full bg-slate-200/70 px-5 py-1.5 text-lg text-slate-600">{t.voiceExample}</p>}
 
       <DigitDisplay digits={digits} />
       {transcript && <p className="max-w-full truncate text-center text-base text-slate-500">"{transcript.trim()}"</p>}
@@ -126,9 +136,11 @@ export function VoiceInput({ onResult, onTypeInstead }: { onResult: (mobile: str
           <p className="text-center text-2xl font-bold text-brand-900">{t.voiceIsCorrect}</p>
           <div className="grid grid-cols-2 gap-4">
             <Button variant="secondary" onClick={() => { voice.stop(); start() }} disabled={!Ctor}>
-              {t.voiceRetry}
+              {t.tryAgain}
             </Button>
-            <Button onClick={() => onResult(mobile)}>{t.next}</Button>
+            <Button onClick={() => onResult(mobile)}>
+              <CheckIcon className="h-7 w-7" strokeWidth={3} /> {t.confirmShort}
+            </Button>
           </div>
         </div>
       ) : (
