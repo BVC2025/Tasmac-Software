@@ -63,9 +63,8 @@ export function Welcome({ onStart }: { onStart: () => void }) {
   const { t, lang, setLang } = useLang()
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-gradient-to-b from-brand-800 to-brand-900 px-8 py-10 text-center text-white">
-      <p className="text-5xl font-extrabold tracking-[0.2em] tall:text-6xl">TASMAC</p>
-      <p className="mt-3 text-xl font-semibold tracking-widest text-brand-100 uppercase tall:text-2xl">{t.welcomeKicker}</p>
-      <h1 className="mt-10 text-6xl font-extrabold tall:text-7xl">{t.welcomeTitle}</h1>
+      {/* TASMAC and the service name are already in the header */}
+      <h1 className="text-6xl font-extrabold tall:text-7xl">{t.welcomeTitle}</h1>
       <p className="mt-4 max-w-2xl text-2xl text-white/85">{t.welcomeSub}</p>
       <BottlesArt className="my-10 h-60 w-auto text-emerald-300 tall:my-16 tall:h-80" />
       <div className="flex rounded-full bg-white/10 p-1.5 ring-1 ring-white/20">
