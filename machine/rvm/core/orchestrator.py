@@ -73,6 +73,7 @@ class Bottle:
     mfg_qr: str | None = None
     amount_paise: int = 0
     brand: str | None = None    # from the manufacturing QR (shown on the kiosk)
+    step_at: float = 0.0        # loop time the current step was shown (demo step hold)
     reason: str = ""
     handed_back: bool = False   # physically returned to the inlet
 
@@ -180,6 +181,20 @@ class Orchestrator:
     def _lane_step(self, b: Bottle, step: LaneStep, **data) -> None:
         b.step = step
         self.bus.publish("lane", lane=b.lane, step=step.value, reason=b.reason or None, **data)
+
+    async def _hold(self, since: float) -> None:
+        """Demo pacing: wait until flow.step_min_display_s has passed since `since`."""
+        left = self.flow.step_min_display_s - (asyncio.get_running_loop().time() - since)
+        if left > 0:
+            await asyncio.sleep(left)
+
+    async def _show_step(self, b: Bottle, step: LaneStep, **data) -> None:
+        """Next check step; the previous step's screen stays up for at least step_min_display_s.
+        DETECTED and POSITIONING share one screen, so they are not held apart."""
+        if b.step_at and step != LaneStep.POSITIONING:
+            await self._hold(b.step_at)
+        self._lane_step(b, step, **data)
+        b.step_at = asyncio.get_running_loop().time()
 
     # ======================= health / faults =======================
 
@@ -331,7 +346,9 @@ class Orchestrator:
         # ---- 4. payout ----
         self._set_state(MachineState.PAYING, amount_paise=amount, bottle_count=len(held))
         self._message("PROCESSING_PAYMENT", amount_paise=amount)
+        paying_since = asyncio.get_running_loop().time()
         status = await self._payout(session, amount)
+        await self._hold(paying_since)   # demo pacing only (0 on a real machine)
 
         # ---- 5. result ----
         if status == PayoutStatus.SUCCESS:
@@ -349,10 +366,10 @@ class Orchestrator:
     async def _check_lane(self, session: Session, b: Bottle) -> None:
         ln = b.lane
         try:
-            self._lane_step(b, LaneStep.DETECTED)
+            await self._show_step(b, LaneStep.DETECTED)
             await self._close_inlet(ln)
 
-            self._lane_step(b, LaneStep.POSITIONING)
+            await self._show_step(b, LaneStep.POSITIONING)
             try:
                 await self.plc.command(Cmd.MOVE_TO_SCAN, lane=ln)
             except PLCCommandError as e:
@@ -361,7 +378,7 @@ class Orchestrator:
                 raise
             await self.plc.wait_for_lane(ln, LaneSensor.BOTTLE_IN_SCAN_POSITION, timeout=3)
 
-            self._lane_step(b, LaneStep.INSPECTING)
+            await self._show_step(b, LaneStep.INSPECTING)
             await self.plc.command(Cmd.LIGHT_ON, lane=ln)
             for _ in range(self.flow.inspection_angles):
                 await self._capture_and_rotate(b)
@@ -369,7 +386,7 @@ class Orchestrator:
             if not result.ok:
                 raise LaneRejected(f"BOTTLE_{result.reason or 'INVALID'}")
 
-            self._lane_step(b, LaneStep.SCANNING_REFUND_QR)
+            await self._show_step(b, LaneStep.SCANNING_REFUND_QR)
             b.refund_qr = await self._find_qr(b, "refund")
             if not b.refund_qr:
                 # a code was read but it is not a TASMAC refund QR we know
@@ -378,7 +395,7 @@ class Orchestrator:
             if not v.ok:
                 raise LaneRejected(v.reason)
 
-            self._lane_step(b, LaneStep.SCANNING_MFG_QR)
+            await self._show_step(b, LaneStep.SCANNING_MFG_QR)
             b.mfg_qr = await self._find_qr(b, "mfg")
             if not b.mfg_qr:
                 raise LaneRejected("MFG_QR_INVALID_FORMAT" if None in b.kinds.values() else "MFG_QR_NOT_FOUND")
@@ -388,7 +405,7 @@ class Orchestrator:
             b.brand = v.data.get("brand_name") or v.data.get("brand")
 
             # eligibility reserves the refund QR on the server for this session + lane
-            self._lane_step(b, LaneStep.VERIFYING, brand=b.brand)
+            await self._show_step(b, LaneStep.VERIFYING, brand=b.brand)
             v = await self._backend_or_lane_reject(
                 self.backend.check_eligibility(session.id, b.refund_qr, b.mfg_qr, ln))
             if not v.ok:
@@ -396,7 +413,8 @@ class Orchestrator:
             b.amount_paise = int(v.data.get("amount_paise", REFUND_AMOUNT_PAISE))
             await self.plc.command(Cmd.LIGHT_OFF, lane=ln)
             await self.plc.command(Cmd.MOVE_TO_HOLD, lane=ln)
-            self._lane_step(b, LaneStep.VALID, amount_paise=b.amount_paise, brand=b.brand)
+            await self._show_step(b, LaneStep.VALID, amount_paise=b.amount_paise, brand=b.brand)
+            await self._hold(b.step_at)   # "bottle verified" screen
 
         except LaneRejected as r:
             b.reason = r.reason
@@ -408,7 +426,7 @@ class Orchestrator:
                 await self.plc.command(Cmd.REJECT_BOTTLE, lane=ln)
                 b.handed_back = True
             await self._safe_backend(self.backend.bottle_rejected(session.id, ln, r.reason))
-            self._lane_step(b, LaneStep.REJECTED)
+            await self._show_step(b, LaneStep.REJECTED)
             self._message("BOTTLE_REJECTED", lane=ln, reason=r.reason)
 
     async def _close_inlet(self, lane: int) -> None:

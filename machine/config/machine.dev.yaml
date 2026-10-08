@@ -25,6 +25,7 @@ local_api:
   cors_origins: ["http://localhost:5173"]
 
 flow:
+  step_min_display_s: 10        # demo pacing: each check screen stays 10 s (0 on the real machine)
   customer_input_timeout_s: 90
   payout_poll_interval_s: 1.0
   payout_pending_wait_s: 10

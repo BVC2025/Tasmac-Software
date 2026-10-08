@@ -32,6 +32,9 @@ class SimulatorConfig(BaseModel):
 
 class FlowConfig(BaseModel):
     batch_window_s: float = 3.0        # after the first bottle, wait this long for bottles in other inlets
+    # Demo / simulation only: keep each bottle-check screen (and "processing payment") up at least this
+    # long, so people can follow the flow. 0 on a real machine: real motion and camera time is enough.
+    step_min_display_s: float = 0.0
     inspection_angles: int = 4         # Images per bottle (rotating between)
     qr_scan_max_rotations: int = 8
     close_inlet_retries: int = 3

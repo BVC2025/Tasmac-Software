@@ -1,6 +1,7 @@
 """End-to-end customer workflow tests (simulated PLC + mock services)."""
 
 import asyncio
+from datetime import datetime
 
 from rvm.core.events import MachineState
 from rvm.plc.registers import LaneSensor
@@ -260,3 +261,23 @@ async def test_single_lane_machine(make_rig):
     async with make_rig([bottle()], lanes=1) as rig:
         s = await rig.insert_and_wait(1)
         assert s.outcome == "ACCEPTED" and list(s.bottles) == [1]
+
+
+async def test_demo_step_hold_keeps_each_screen_up(make_rig):
+    hold = 0.25
+    async with make_rig([bottle()], lanes=1, step_min_display_s=hold) as rig:
+        q = rig.bus.subscribe()
+        s = await rig.insert_and_wait(1, timeout=15)
+        assert s.outcome == "ACCEPTED"
+        steps = []
+        while not q.empty():
+            ev = q.get_nowait()
+            if ev.type == "lane":
+                steps.append((ev.data["step"], ev.at))
+        names = [n for n, _ in steps]
+        assert names[:7] == ["DETECTED", "POSITIONING", "INSPECTING", "SCANNING_REFUND_QR",
+                             "SCANNING_MFG_QR", "VERIFYING", "VALID"]
+        # every screen after the first (DETECTED/POSITIONING share one) stayed up >= hold
+
+        t = [datetime.fromisoformat(a).timestamp() for _, a in steps[1:7]]
+        assert all(b - a >= hold * 0.9 for a, b in zip(t, t[1:])), list(zip(names[1:7], t))

@@ -43,6 +43,7 @@ local_api:
   cors_origins: ["http://localhost:5173"]
 
 flow:
+  step_min_display_s: 10        # demo pacing: each check screen stays 10 s (0 on the real machine)
   customer_input_timeout_s: 120
   inspection_angles: 4
   qr_scan_max_rotations: 40         # ~15 s to show the QRs to the camera
