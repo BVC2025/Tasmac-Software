@@ -1,9 +1,8 @@
 /**
  * Realistic-looking bottle and sticker artwork for the check screens (pure SVG, no photos).
  *
- * Every code drawn here is a DUMMY: the QR has the three corner squares but random
- * modules and no format information, so no scanner can decode it; the barcode has
- * no digits. No brand names or logos.
+ * The QR on the neck sticker is a DUMMY: three corner squares but random modules and
+ * no format information, so no scanner can decode it. No brand names or logos.
  */
 
 /** Deterministic pseudo-random QR-looking matrix (not a real QR: nothing to decode). */
@@ -39,26 +38,6 @@ function DummyQr({ x, y, size, seed = 7, cells = 21 }: { x: number; y: number; s
       {m.flatMap((row, r) =>
         row.map((on, c) => (on ? <rect key={`${r}-${c}`} x={x + c * s} y={y + r * s} width={s + 0.05} height={s + 0.05} fill="#111" /> : null)),
       )}
-    </g>
-  )
-}
-
-function DummyBarcode({ x, y, w, h, seed = 3 }: { x: number; y: number; w: number; h: number; seed?: number }) {
-  let v = seed
-  const bars: { x: number; w: number }[] = []
-  let cx = x
-  while (cx < x + w - 2) {
-    v = (v * 1103515245 + 12345) & 0x7fffffff
-    const bw = 1 + (v % 3)
-    const gap = 1 + ((v >> 3) % 3)
-    if (cx + bw > x + w) break
-    bars.push({ x: cx, w: bw })
-    cx += bw + gap
-  }
-  return (
-    <g>
-      <rect x={x - 6} y={y - 6} width={w + 12} height={h + 12} fill="#fff" rx="2" />
-      {bars.map((b, i) => <rect key={i} x={b.x} y={y} width={b.w} height={h} fill="#111" />)}
     </g>
   )
 }
@@ -145,56 +124,6 @@ export function RealBottle({ className = '', turning = true }: { className?: str
       {/* crown cap */}
       <rect x="80" y="14" width="40" height="24" rx="4" fill="url(#ba-cap)" />
       {[84, 90, 96, 102, 108, 114].map((x) => <rect key={x} x={x} y="30" width="2" height="8" fill="#5c4d1a" opacity="0.6" />)}
-    </svg>
-  )
-}
-
-/**
- * Close-up of the sticker being read. kind = refund: neck sticker with a QR;
- * kind = mfg: back label with a barcode and a small QR.
- */
-export function StickerCloseup({ kind, className = '' }: { kind: 'refund' | 'mfg'; className?: string }) {
-  return (
-    <svg viewBox="0 0 400 300" className={className} role="img" aria-label={kind === 'refund' ? 'Refund QR sticker' : 'Manufacturing label'}>
-      <GlassDefs />
-      <defs>
-        <linearGradient id="ba-glass-h" x1="0" x2="1">
-          <stop offset="0" stopColor="#1c0b01" />
-          <stop offset="0.25" stopColor="#7a3e0c" />
-          <stop offset="0.5" stopColor="#c98431" />
-          <stop offset="0.75" stopColor="#7a3e0c" />
-          <stop offset="1" stopColor="#1c0b01" />
-        </linearGradient>
-        <clipPath id="ba-cyl">
-          <rect x={kind === 'refund' ? 95 : 30} y="-10" width={kind === 'refund' ? 210 : 340} height="320" rx="30" />
-        </clipPath>
-      </defs>
-      <rect x="0" y="0" width="400" height="300" fill="url(#ba-glow)" />
-      {/* glass cylinder seen up close */}
-      <rect x={kind === 'refund' ? 95 : 30} y="-10" width={kind === 'refund' ? 210 : 340} height="320" fill="url(#ba-glass-h)" />
-      <g clipPath="url(#ba-cyl)">
-        <g className="ba-turn-in">
-          {kind === 'refund' ? (
-            <g>
-              <rect x="128" y="58" width="144" height="184" rx="6" fill="#f8fafc" />
-              <rect x="128" y="58" width="144" height="24" rx="6" fill="#1d4ed8" />
-              <rect x="146" y="66" width="70" height="8" rx="3" fill="#fff" opacity="0.85" />
-              <DummyQr x={152} y={94} size={96} cells={21} seed={7} />
-              <rect x="150" y="222" width="100" height="8" rx="3" fill="#1d4ed8" opacity="0.5" />
-            </g>
-          ) : (
-            <g>
-              <rect x="60" y="40" width="280" height="220" rx="6" fill="#f3efe3" />
-              <rect x="60" y="40" width="280" height="26" rx="6" fill="#1e3a5f" />
-              {[84, 98, 112, 126, 140, 154].map((y) => <rect key={y} x="78" y={y} width={120 - (y % 3) * 14} height="6" rx="3" fill="#1e3a5f" opacity="0.35" />)}
-              <DummyBarcode x={86} y={182} w={150} h={52} seed={5} />
-              <DummyQr x={262} y={92} size={62} cells={17} seed={23} />
-            </g>
-          )}
-        </g>
-        <rect x="0" y="-10" width="400" height="320" fill="url(#ba-shade)" opacity="0.8" />
-      </g>
-      <path d={kind === 'refund' ? 'M128 -10 L128 310' : 'M70 -10 L70 310'} stroke="#fff" strokeWidth="6" opacity="0.18" />
     </svg>
   )
 }

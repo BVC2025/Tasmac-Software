@@ -162,19 +162,13 @@ body {
   .animate-scan-line, .animate-progress, .animate-wave, .animate-pop { animation: none; }
 }
 
-/* ---- bottle artwork: label slides = bottle turning on the rollers; sticker turns into view ---- */
+/* ---- bottle artwork: label slides = bottle turning on the rollers ---- */
 @keyframes ba-turn {
   from { transform: translateX(0); }
   to { transform: translateX(-160px); }
 }
 .ba-turn { animation: ba-turn 6s linear infinite; }
 
-@keyframes ba-turn-in {
-  0% { transform: translateX(150px); opacity: 0.4; }
-  100% { transform: translateX(0); opacity: 1; }
-}
-.ba-turn-in { animation: ba-turn-in 1.8s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-
 @media (prefers-reduced-motion: reduce) {
-  .ba-turn, .ba-turn-in { animation: none; }
+  .ba-turn { animation: none; }
 }

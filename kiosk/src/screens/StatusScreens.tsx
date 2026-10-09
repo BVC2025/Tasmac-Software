@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import { Banner, Countdown, DetailCard, ProgressBar, ScanFrame, Screen, Spinner, StatusBadge, Stepper, Title } from '../components/ui'
-import { AlertIcon, ArrowRightIcon, BottleIcon, CheckIcon, ClockIcon, LeafIcon, XIcon } from '../components/Icons'
+import { AlertIcon, ArrowRightIcon, BottleIcon, CheckIcon, ClockIcon, LeafIcon, QrIcon, XIcon } from '../components/Icons'
 import { InsertAnimation } from '../components/InsertAnimation'
-import { RealBottle, StickerCloseup } from '../components/BottleArt'
+import { RealBottle } from '../components/BottleArt'
 import { useLang } from '../i18n'
 import type { LaneView, MachineView } from '../useMachine'
 
@@ -226,7 +226,7 @@ function BottleSteps({ lane }: { lane: LaneView }) {
         <DoneChip>{idx === 2 ? t.conditionOk : t.refundQrOk}</DoneChip>
         <Title sub={idx === 2 ? t.refundQrSub : t.mfgQrSub}>{idx === 2 ? t.refundQrTitle : t.mfgQrTitle}</Title>
         <ScanFrame tone="alert">
-          {picture(<StickerCloseup key={idx} kind={idx === 2 ? 'refund' : 'mfg'} className="h-full w-full" />)}
+          {picture(<QrIcon className="h-44 w-44 text-white/85" strokeWidth={1.2} />)}
         </ScanFrame>
         <p className="mt-6 flex items-center gap-3 text-lg text-slate-600"><Spinner className="h-6 w-6" thin /> {t.scanning}</p>
       </>
