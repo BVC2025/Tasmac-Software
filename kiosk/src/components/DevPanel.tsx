@@ -20,6 +20,14 @@ export function DevPanel({ view }: { view: MachineView }) {
   const [batch, setBatch] = useState<string[]>(['happy-path-upi', 'damaged-bottle', 'happy-path-mobile'])
   const laneNumbers = Array.from({ length: view.laneCount }, (_, i) => i + 1)
 
+  // Esc closes the panel
+  useEffect(() => {
+    if (!open) return
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false)
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
   useEffect(() => {
     if (!open) return
     api.simBottles().then(setBottles).catch(() => {})
@@ -63,10 +71,16 @@ export function DevPanel({ view }: { view: MachineView }) {
 
   return (
     <aside className="fixed top-0 right-0 bottom-0 z-50 flex w-96 flex-col gap-4 overflow-y-auto bg-slate-900 p-4 text-sm text-slate-200 shadow-2xl select-text">
-      <div className="flex items-center justify-between">
+      {/* stays at the top while the panel scrolls, so it can always be closed */}
+      <div className="sticky -top-4 z-10 -mx-4 -mt-4 flex items-center justify-between border-b border-slate-700 bg-slate-900/95 px-4 py-3 backdrop-blur">
         <h2 className="font-bold text-amber-300">Developer panel (simulation)</h2>
-        <button onClick={() => setOpen(false)} aria-label="Close">
-          <XIcon className="h-5 w-5" />
+        <button
+          onClick={() => setOpen(false)}
+          aria-label="Close"
+          title="Close (Esc)"
+          className="flex items-center gap-1.5 rounded-lg bg-slate-700 px-3 py-1.5 text-xs font-semibold text-white hover:bg-red-700"
+        >
+          <XIcon className="h-4 w-4" /> Close
         </button>
       </div>
 
