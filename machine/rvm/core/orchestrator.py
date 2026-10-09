@@ -157,6 +157,8 @@ class Orchestrator:
                 log.error("Central server unreachable (%s checks)", failures)
             elif not was_ok and self.backend_ok:
                 log.info("Central server reachable again")
+            if was_ok != self.backend_ok:
+                self.bus.publish("server", ok=self.backend_ok)   # kiosk connection icon
             await asyncio.sleep(self.flow.backend_check_interval_s)
 
     async def _run(self) -> None:

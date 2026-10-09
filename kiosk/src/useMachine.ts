@@ -25,6 +25,7 @@ export interface SessionResult {
 
 export interface MachineView {
   connected: boolean
+  serverOk: boolean // machine can reach the central server (payments, QR checks)
   state: string
   stateData: Ev
   stateAt: number
@@ -43,6 +44,7 @@ export interface MachineView {
 
 const initial: MachineView = {
   connected: false,
+  serverOk: true,
   state: 'STARTING',
   stateData: { type: 'state' },
   stateAt: Date.now(),
@@ -77,6 +79,7 @@ function reducer(s: MachineView, a: Action): MachineView {
         laneCount: ev.lane_count ?? 1,
         lanes: Object.fromEntries(((ev.lanes ?? []) as LaneView[]).map((l) => [l.lane, l])),
         simulation: ev.simulation,
+        serverOk: ev.server_ok ?? true,
         plc: ev.plc,
       }
     case 'state': {
@@ -112,6 +115,8 @@ function reducer(s: MachineView, a: Action): MachineView {
       }
     case 'fault':
       return { ...s, fault: ev.reason }
+    case 'server':
+      return { ...s, serverOk: !!ev.ok }
     default:
       return s
   }

@@ -167,6 +167,7 @@ async def test_backend_outage_takes_machine_out_of_service(make_rig):
             return healthy
 
         rig.backend.health = health
+        events = rig.bus.subscribe()
         healthy = False
         await rig.wait_state(MachineState.OUT_OF_SERVICE, timeout=5)
         assert rig.orch.fault_reason == "BACKEND_UNREACHABLE"
@@ -174,6 +175,12 @@ async def test_backend_outage_takes_machine_out_of_service(make_rig):
         healthy = True
         await rig.wait_state(MachineState.READY, timeout=5)
         assert rig.orch.fault_reason is None
+        server = []
+        while not events.empty():
+            ev = events.get_nowait()
+            if ev.type == "server":
+                server.append(ev.data["ok"])
+        assert server == [False, True]   # kiosk connection icon: orange, then green again
         assert (await rig.insert_and_wait()).outcome == "ACCEPTED"
 
 

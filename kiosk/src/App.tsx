@@ -37,15 +37,36 @@ function useSecretTaps(enabled: boolean) {
   }
 }
 
+/** Connection light: green = all good, orange = no central server (payments), red = no machine. */
+function ConnectionIcon({ view }: { view: MachineView }) {
+  const { lang } = useLang()
+  const status = !view.connected ? 'machine' : !view.serverOk ? 'server' : 'ok'
+  const label = {
+    ok: lang === 'ta' ? 'இணைப்பு சரி' : 'Online',
+    server: lang === 'ta' ? 'சர்வர் இணைப்பு இல்லை' : 'Server offline',
+    machine: lang === 'ta' ? 'இயந்திர இணைப்பு இல்லை' : 'Machine offline',
+  }[status]
+  return (
+    <span title={label} aria-label={label} role="img" className="relative flex h-12 w-12 items-center justify-center rounded-full bg-white/10">
+      {status === 'machine' ? (
+        <WifiOffIcon className="h-7 w-7 text-red-400" />
+      ) : (
+        <WifiIcon className={`h-7 w-7 ${status === 'ok' ? 'text-emerald-300' : 'text-amber-400'}`} />
+      )}
+      {status !== 'ok' && (
+        <span className={`absolute top-1.5 right-1.5 h-3 w-3 animate-pulse rounded-full ${status === 'server' ? 'bg-amber-400' : 'bg-red-500'}`} />
+      )}
+    </span>
+  )
+}
+
 function Header({ view }: { view: MachineView }) {
   const { t, lang, setLang } = useLang()
   const secretTap = useSecretTaps(view.simulation)
   return (
     <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 bg-brand-800 px-6 py-3 text-white shadow-lg">
       <div className="flex items-center gap-3">
-        <span title={view.connected ? 'Online' : 'Offline'} className="flex h-12 w-12 items-center justify-center rounded-full bg-white/10">
-          {view.connected ? <WifiIcon className="h-7 w-7 text-emerald-300" /> : <WifiOffIcon className="h-7 w-7 text-red-300" />}
-        </span>
+        <ConnectionIcon view={view} />
         <VoiceToggle />
       </div>
       <div className="text-center" onClick={secretTap}>

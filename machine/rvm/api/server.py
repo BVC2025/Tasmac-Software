@@ -117,6 +117,7 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
             "lane_count": len(orch.lanes),
             "lanes": list(lanes_now.values()),
             "simulation": sim is not None,
+            "server_ok": orch.backend_ok,
             "plc": {"connected": s.connected, "state": s.state.name, "fault": s.fault_code.name,
                     "bin_fill_pct": s.bin_fill_pct},
         }
