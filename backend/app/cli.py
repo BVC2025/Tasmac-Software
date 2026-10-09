@@ -63,10 +63,20 @@ async def create_admin(username: str, name: str, role: str, password: str | None
     print(f"Admin user {username} ({role}) created")
 
 
+async def test_sms(mobile: str) -> None:
+    from .providers import get_sms_provider
+
+    provider = get_sms_provider()
+    sent, ref = await provider.send(mobile, "TASMAC RVM test SMS: if you can read this, refund SMS works. -TASMAC")
+    print(f"{type(provider).__name__}: {'SENT' if sent else 'FAILED'} ({ref})")
+
+
 def main() -> None:
     p = argparse.ArgumentParser()
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("seed-brands")
+    t = sub.add_parser("test-sms", help="send one test SMS with the configured provider")
+    t.add_argument("mobile")
     c = sub.add_parser("create-machine")
     c.add_argument("machine_id")
     c.add_argument("--name", default="RVM")
@@ -80,7 +90,9 @@ def main() -> None:
     u.add_argument("--role", default="ADMIN", choices=[r.value for r in Role])
     u.add_argument("--password", help="dev only; omit to be prompted")
     a = p.parse_args()
-    if a.cmd == "seed-brands":
+    if a.cmd == "test-sms":
+        asyncio.run(test_sms(a.mobile))
+    elif a.cmd == "seed-brands":
         asyncio.run(seed_brands())
     elif a.cmd == "create-machine":
         asyncio.run(create_machine(a.machine_id, a.name, a.location, a.api_key))

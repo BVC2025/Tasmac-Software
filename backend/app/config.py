@@ -21,7 +21,13 @@ class Settings(BaseSettings):
 
     # Providers: "mock" until real accounts exist
     payout_provider: str = "mock"
-    sms_provider: str = "mock"
+    sms_provider: str = "mock"            # mock | android_gateway (internal testing only)
+    # "SMS Gateway for Android" app in Local Server mode (sms-gate.app): a test phone sends the SMS
+    # from its own SIM. Testing only - production SMS needs DLT + a registered provider.
+    sms_gateway_url: str = ""              # e.g. http://192.168.1.3:8080
+    sms_gateway_username: str = ""
+    sms_gateway_password: str = ""
+    sms_gateway_timeout_s: float = 10.0
     payout_webhook_secret: str = "change-me"
 
     # Reconciler: polls PENDING payouts in the background

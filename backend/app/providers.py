@@ -10,6 +10,10 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import httpx
+
+from .config import get_settings
+
 log = logging.getLogger(__name__)
 
 
@@ -96,6 +100,38 @@ class MockSmsProvider(SmsProvider):
         return True, f"MOCKSMS-{uuid.uuid4().hex[:10]}"
 
 
+class AndroidGatewaySmsProvider(SmsProvider):
+    """Real SMS from a test phone running "SMS Gateway for Android" (Local Server mode).
+
+    For internal testing only: the SMS goes out from that phone's own SIM and number.
+    Production needs TRAI DLT registration and a registered SMS provider.
+    """
+
+    def __init__(self, url: str, username: str, password: str, timeout_s: float = 10.0,
+                 transport: httpx.AsyncBaseTransport | None = None):
+        if not url:
+            raise ValueError("RVM_SMS_GATEWAY_URL is not set")
+        self._c = httpx.AsyncClient(base_url=url.rstrip("/"), auth=(username, password), timeout=timeout_s,
+                                    transport=transport)
+
+    async def send(self, mobile: str, body: str) -> tuple[bool, str | None]:
+        number = mobile if mobile.startswith("+") else "+91" + mobile[-10:]
+        try:
+            r = await self._c.post("/message", json={"textMessage": {"text": body}, "phoneNumbers": [number]})
+        except httpx.HTTPError as e:
+            log.warning("SMS gateway unreachable: %s", e)
+            return False, f"gateway unreachable: {type(e).__name__}"[:120]
+        if r.status_code >= 400:
+            log.warning("SMS gateway refused (%s): %s", r.status_code, r.text[:200])
+            return False, f"gateway HTTP {r.status_code}"
+        try:
+            ref = r.json().get("id")
+        except ValueError:
+            ref = None
+        log.info("SMS to %s accepted by the gateway (%s)", number[:-4] + "XXXX", ref)
+        return True, ref or f"GW-{uuid.uuid4().hex[:10]}"
+
+
 _payout: PayoutProvider | None = None
 _sms: SmsProvider | None = None
 
@@ -110,5 +146,12 @@ def get_payout_provider() -> PayoutProvider:
 def get_sms_provider() -> SmsProvider:
     global _sms
     if _sms is None:
-        _sms = MockSmsProvider()
+        s = get_settings()
+        if s.sms_provider == "android_gateway":
+            _sms = AndroidGatewaySmsProvider(s.sms_gateway_url, s.sms_gateway_username, s.sms_gateway_password,
+                                             s.sms_gateway_timeout_s)
+        elif s.sms_provider == "mock":
+            _sms = MockSmsProvider()
+        else:
+            raise ValueError(f"Unknown RVM_SMS_PROVIDER {s.sms_provider!r} (mock | android_gateway)")
     return _sms
