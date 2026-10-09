@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import { Banner, Countdown, DetailCard, ProgressBar, ScanFrame, Screen, Spinner, StatusBadge, Stepper, Title } from '../components/ui'
-import { AlertIcon, ArrowRightIcon, BottleIcon, CheckIcon, ClockIcon, LeafIcon, QrIcon, XIcon } from '../components/Icons'
+import { AlertIcon, ArrowRightIcon, BottleIcon, CheckIcon, ClockIcon, LeafIcon, MicIcon, QrIcon, XIcon } from '../components/Icons'
 import { InsertAnimation } from '../components/InsertAnimation'
 import { RealBottle } from '../components/BottleArt'
 import { useLang } from '../i18n'
@@ -60,7 +60,7 @@ function BottlesArt({ className = '' }: { className?: string }) {
 }
 
 /** First screen for a new customer: what the machine does, language, Start. */
-export function Welcome({ onStart }: { onStart: () => void }) {
+export function Welcome({ onStart, onVoiceTest }: { onStart: () => void; onVoiceTest?: () => void }) {
   const { t, lang, setLang } = useLang()
   return (
     <div className="flex flex-1 flex-col items-center justify-center bg-gradient-to-b from-brand-800 to-brand-900 px-8 py-10 text-center text-white">
@@ -88,6 +88,14 @@ export function Welcome({ onStart }: { onStart: () => void }) {
       <p className="mt-10 flex items-center gap-2 text-lg text-emerald-200/80">
         <LeafIcon className="h-6 w-6" /> {t.tagline}
       </p>
+      {onVoiceTest && (
+        <button
+          onClick={onVoiceTest}
+          className="mt-8 inline-flex items-center gap-2 rounded-full border border-dashed border-amber-300/70 px-5 py-2 text-base font-semibold text-amber-200"
+        >
+          <MicIcon className="h-5 w-5" /> Voice test (dev only)
+        </button>
+      )}
     </div>
   )
 }

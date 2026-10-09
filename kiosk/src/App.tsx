@@ -4,6 +4,7 @@ import { DEV_TOGGLE_EVENT, DevPanel } from './components/DevPanel'
 import { SpeakerIcon, SpeakerOffIcon, WifiIcon, WifiOffIcon } from './components/Icons'
 import { LangProvider, useLang } from './i18n'
 import { Confirm, RefundMethod, Result } from './screens/RefundFlow'
+import { VoiceTest } from './screens/VoiceTest'
 import { Checking, Closed, Connecting, isCheckingState, OutOfService, Paying, Ready, Rejecting, Starting, Welcome } from './screens/StatusScreens'
 import { useMachine, type MachineView } from './useMachine'
 import { cueFor, rejectClip, useVoice, VoiceProvider } from './voice'
@@ -93,12 +94,14 @@ function Header({ view }: { view: MachineView }) {
   )
 }
 
-function Body({ view, clearResult, welcome, onStart }: {
+function Body({ view, clearResult, welcome, onStart, voiceTest, setVoiceTest }: {
   view: MachineView; clearResult: () => void; welcome: boolean; onStart: () => void
+  voiceTest: boolean; setVoiceTest: (on: boolean) => void
 }) {
   const s = view.state
   if (!view.connected) return <Connecting />
-  if (welcome) return <Welcome onStart={onStart} />
+  if (voiceTest) return <VoiceTest onClose={() => setVoiceTest(false)} />
+  if (welcome) return <Welcome onStart={onStart} onVoiceTest={view.simulation ? () => setVoiceTest(true) : undefined} />
   if (s === 'OUT_OF_SERVICE') return <OutOfService reason={view.fault ?? view.stateData.reason} showReason={view.simulation} />
   // Hold the outcome screen for a few seconds after the session ends
   // (also when service hours ended during that customer: CLOSED follows the session)
@@ -126,6 +129,9 @@ function Kiosk() {
   // Welcome screen until the customer taps Start (a bottle in the inlet skips it)
   const [started, setStarted] = useState(false)
   const welcome = view.state === 'READY' && !view.result && !started
+  // dev-only voice test from the welcome screen; a bottle in the inlet ends it
+  const [voiceTestOn, setVoiceTest] = useState(false)
+  const voiceTest = voiceTestOn && view.simulation && view.state === 'READY' && !view.result
 
   // Back to Tamil and the welcome screen for the next customer
   // (silently: the old prompt must not replay)
@@ -150,7 +156,7 @@ function Kiosk() {
 
   // Spoken guidance: one clip per new instruction, in the selected language.
   // Played a tick later so a language reset in the same update is applied first.
-  const cue = welcome ? null : cueFor(view)
+  const cue = welcome || voiceTest ? null : cueFor(view)
   const cueKey = cue?.key
   const cueClip = cue?.clip
   const cueQueue = cue?.queue
@@ -179,7 +185,14 @@ function Kiosk() {
     <div className="flex h-full flex-col">
       <Header view={view} />
       <main className="flex flex-1 flex-col overflow-y-auto">
-        <Body view={view} clearResult={clearResult} welcome={welcome} onStart={() => setStarted(true)} />
+        <Body
+          view={view}
+          clearResult={clearResult}
+          welcome={welcome}
+          onStart={() => setStarted(true)}
+          voiceTest={voiceTest}
+          setVoiceTest={setVoiceTest}
+        />
       </main>
       {view.simulation && <DevPanel view={view} />}
     </div>
