@@ -17,9 +17,11 @@ from ..security import current_machine
 router = APIRouter(prefix="/api/machine/v1", tags=["machine"])
 
 
-@router.post("/heartbeat", status_code=204)
+@router.post("/heartbeat")
 async def heartbeat(body: HeartbeatIn, m: Machine = Depends(current_machine), db: AsyncSession = Depends(get_db)):
+    """Status in; settings out (the machine keeps the last ones it got, for offline use)."""
     await svc.heartbeat(db, m, body.state, body.bin_fill_pct, body.software_version, body.fault_reason)
+    return {"service_hours": m.service_hours}
 
 
 @router.post("/qr/classify")

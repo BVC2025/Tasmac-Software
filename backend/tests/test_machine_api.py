@@ -19,7 +19,7 @@ async def test_auth_required(client):
 
 async def test_heartbeat(machine):
     r = await machine.post("/heartbeat", {"state": "READY", "bin_fill_pct": 12})
-    assert r.status_code == 204
+    assert r.status_code == 200
 
 
 async def test_refund_qr_verification(machine):

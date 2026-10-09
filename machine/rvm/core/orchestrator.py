@@ -35,6 +35,7 @@ from ..services.customer import CustomerInterface
 from ..services.session_log import SessionLog
 from ..services.vision import BottleInspector, Camera, Frame, QRReader
 from .events import EventBus, LaneStep, MachineState
+from .schedule import IST, ServiceHours, ServiceHoursStore
 
 log = logging.getLogger(__name__)
 
@@ -132,6 +133,22 @@ class Orchestrator:
         self.session_log = session_log
         self.fault_reason: str | None = None       # reported in the heartbeat
         self.backend_ok = True                     # kept up to date by watch_backend()
+        self._hours_store = ServiceHoursStore(cfg.service_hours_path)
+        stored = self._hours_store.load()
+        self.service_hours = ServiceHours(stored if stored is not None else cfg.service_hours)
+        self._clock = lambda: datetime.now(IST)    # tests replace this
+
+    def set_service_hours(self, windows: list[dict] | None) -> None:
+        """New service hours from the server (heartbeat reply); remembered for offline use."""
+        hours = ServiceHours(windows)
+        if hours == self.service_hours:
+            return
+        self.service_hours = hours
+        self._hours_store.save(hours.as_list())
+        log.info("Service hours: %s", hours.as_list() or "24 hours")
+
+    def is_open(self) -> bool:
+        return self.service_hours.is_open(self._clock())
 
     @property
     def lanes(self) -> list[int]:
@@ -255,12 +272,30 @@ class Orchestrator:
 
     # ======================= one customer =======================
 
+    async def _closed_until_open(self) -> None:
+        """Outside service hours: inlets closed, the kiosk shows the opening hours."""
+        await self._close_inlets(self.lanes)
+        shown = None
+        while not self.is_open():
+            hours = self.service_hours.as_list()
+            if hours != shown:   # hours changed in the admin portal while closed
+                nxt = self.service_hours.next_open(self._clock())
+                self._set_state(MachineState.CLOSED, hours=hours, next_open=nxt.isoformat() if nxt else None)
+                shown = hours
+            self.plc.check_healthy()   # faults still take the machine out of service
+            await asyncio.sleep(1.0)
+        log.info("Service hours started: open for bottles")
+
     async def _serve_one_customer(self) -> None:
         self.fault_reason = None
+        if not self.is_open():
+            await self._closed_until_open()
         self._set_state(MachineState.READY, lanes=self.lanes)
         await self._parallel([self.plc.command(Cmd.OPEN_INLET, lane=ln) for ln in self.lanes])
         self._message("INSERT_BOTTLE")
         first = await self._wait_for_bottle()
+        if first is None:   # service hours ended while waiting: next round shows CLOSED
+            return
 
         session = Session()
         self._last_session = session
@@ -290,8 +325,9 @@ class Orchestrator:
             log.info("SESSION %s %s %s %s", session.id[:8], session.outcome, session.reason,
                      [(b["lane"], b["step"]) for b in session.summary()])
 
-    async def _wait_for_bottle(self) -> int:
-        """Wait for a bottle in any inlet; stop accepting bottles if the central server goes away."""
+    async def _wait_for_bottle(self) -> int | None:
+        """Wait for a bottle in any inlet; stop accepting bottles if the central server goes away,
+        or when service hours end (returns None). A customer already inside is always finished."""
         while True:
             try:
                 return await self.plc.wait_any_lane(LaneSensor.BOTTLE_AT_INLET, timeout=1.0)
@@ -299,6 +335,9 @@ class Orchestrator:
                 if not self.backend_ok:
                     await self._close_inlets(self.lanes)
                     raise OutOfService("BACKEND_UNREACHABLE")
+                if not self.is_open():
+                    await self._close_inlets(self.lanes)
+                    return None
 
     async def _collect(self, session: Session, first: int) -> list[int]:
         """After the first bottle, give the customer a moment to fill the other inlets."""

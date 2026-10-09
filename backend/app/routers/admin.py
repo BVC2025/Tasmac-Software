@@ -22,7 +22,7 @@ from ..models import (
     AdminUser, Alert, AuditLog, BottleState, EligibleBrand, Machine, QrCode, RefundClaim, Role, RvmSession, SessionBottle,
     SmsMessage, Transaction, TxnStatus, utcnow,
 )
-from ..schemas import MachineOut, StatsOut, TxnAdminOut
+from ..schemas import MachineOut, ServiceWindow, StatsOut, TxnAdminOut
 from ..security import current_admin, hash_api_key, new_api_key, require_role
 
 router = APIRouter(prefix="/api/admin/v1", tags=["admin"], dependencies=[Depends(current_admin)])
@@ -87,6 +87,7 @@ class MachineUpdateIn(BaseModel):
     name: str | None = Field(default=None, max_length=120)
     location: str | None = Field(default=None, max_length=255)
     active: bool | None = None
+    service_hours: list[ServiceWindow] | None = Field(default=None, max_length=4)   # [] or null = 24 hours
 
 
 @router.get("/machines", response_model=list[MachineOut])
@@ -115,6 +116,11 @@ async def update_machine(machine_id: str, body: MachineUpdateIn, user: AdminUser
     if m is None:
         raise HTTPException(404, "Machine not found")
     changes = body.model_dump(exclude_unset=True)
+    if "service_hours" in changes:
+        windows = changes["service_hours"] or []
+        if any(w["start"] == w["end"] for w in windows):
+            raise HTTPException(422, "Service window start and end must differ")
+        changes["service_hours"] = windows or None   # nothing = open 24 hours
     for k, v in changes.items():
         setattr(m, k, v)
     svc.audit(db, _actor(user), "MACHINE_UPDATED", "machine", machine_id, **{k: str(v) for k, v in changes.items()})

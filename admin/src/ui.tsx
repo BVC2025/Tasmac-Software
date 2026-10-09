@@ -46,6 +46,7 @@ const TONE: Record<string, string> = {
   warning: 'bg-amber-100 text-amber-800',
   IN_PROGRESS: 'bg-sky-100 text-sky-800',
   CREATED: 'bg-sky-100 text-sky-800',
+  CLOSED: 'bg-amber-100 text-amber-800',
   OPEN: 'bg-red-100 text-red-800',
   FAILED: 'bg-red-100 text-red-800',
   OUT_OF_SERVICE: 'bg-red-100 text-red-800',

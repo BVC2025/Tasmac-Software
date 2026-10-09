@@ -22,6 +22,7 @@ class MachineState(str, Enum):
     ACCEPTING = "ACCEPTING"
     REJECTING = "REJECTING"
     OUT_OF_SERVICE = "OUT_OF_SERVICE"
+    CLOSED = "CLOSED"           # outside service hours: inlets closed, no bottles taken
 
 
 class LaneStep(str, Enum):

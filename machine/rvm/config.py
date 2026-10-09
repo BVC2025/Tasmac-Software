@@ -89,6 +89,10 @@ class MachineConfig(BaseModel):
     machine_id: str = "RVM-DEV-001"
     software_version: str = "0.3.0"
     session_log_path: str | None = "data/sessions.db"   # local audit trail (SQLite)
+    # Service hours (India time), e.g. [{start: "10:00", end: "11:30"}]; empty = 24 hours.
+    # The admin portal setting (sent with every heartbeat) replaces this and is kept in service_hours_path.
+    service_hours: list[dict] = Field(default_factory=list)
+    service_hours_path: str | None = "data/service_hours.json"
     plc: PLCConfig = Field(default_factory=PLCConfig)
     simulator: SimulatorConfig = Field(default_factory=SimulatorConfig)
     flow: FlowConfig = Field(default_factory=FlowConfig)

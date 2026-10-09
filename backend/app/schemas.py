@@ -65,6 +65,12 @@ class HeartbeatIn(BaseModel):
 
 # ---------- admin ----------
 
+class ServiceWindow(BaseModel):
+    """One opening window per day, India time. end < start means it runs past midnight."""
+    start: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+
+
 class MachineOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -76,6 +82,7 @@ class MachineOut(BaseModel):
     bin_fill_pct: int | None
     software_version: str | None
     fault_reason: str | None
+    service_hours: list[ServiceWindow] | None = None
     last_seen_at: datetime | None
 
 

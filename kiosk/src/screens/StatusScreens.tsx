@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import { Banner, Countdown, DetailCard, ProgressBar, ScanFrame, Screen, Spinner, StatusBadge, Stepper, Title } from '../components/ui'
-import { AlertIcon, ArrowRightIcon, BottleIcon, CheckIcon, LeafIcon, QrIcon, XIcon } from '../components/Icons'
+import { AlertIcon, ArrowRightIcon, BottleIcon, CheckIcon, ClockIcon, LeafIcon, QrIcon, XIcon } from '../components/Icons'
 import { InsertAnimation } from '../components/InsertAnimation'
 import { useLang } from '../i18n'
 import type { LaneView, MachineView } from '../useMachine'
@@ -449,6 +449,44 @@ export function Rejecting({ reason, lanes }: { reason?: string; lanes: LaneView[
         </div>
       )}
       <TakeBottle />
+    </Screen>
+  )
+}
+
+/** "10:00" -> "10:00 AM" */
+const clock12 = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number)
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
+
+/** Outside service hours: when the machine is open, and when it opens next. */
+export function Closed({ hours, nextOpen }: { hours: { start: string; end: string }[]; nextOpen?: string | null }) {
+  const { t } = useLang()
+  const [now] = useState(() => new Date())
+  let opens: string | null = null
+  if (nextOpen) {
+    const d = new Date(nextOpen)
+    const ist = (x: Date) => x.toLocaleDateString('en-CA', { timeZone: 'Asia/Kolkata' })
+    const day = ist(d) === ist(now) ? t.today : t.tomorrow
+    const time = d.toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: 'numeric', minute: '2-digit', hour12: true }).toUpperCase()
+    opens = t.opensAt(`${day} ${time}`)
+  }
+  return (
+    <Screen className="justify-center">
+      <StatusBadge tone="warn"><ClockIcon className="h-20 w-20" /></StatusBadge>
+      <Title sub={t.closedSub}>{t.closedTitle}</Title>
+      <div className="w-full max-w-xl overflow-hidden rounded-3xl bg-white text-center shadow-sm ring-1 ring-slate-200">
+        <p className="bg-brand-50 px-8 py-4 text-xl font-bold text-brand-800">{t.serviceHours}</p>
+        <ul className="divide-y divide-slate-100">
+          {hours.map((w) => (
+            <li key={w.start + w.end} className="px-8 py-5 text-3xl font-extrabold text-brand-900 tabular-nums">
+              {clock12(w.start)} – {clock12(w.end)}
+            </li>
+          ))}
+        </ul>
+      </div>
+      {opens && <p className="mt-8 rounded-full bg-amber-50 px-6 py-3 text-2xl font-bold text-amber-900 ring-1 ring-amber-200">{opens}</p>}
+      <p className="mt-8 flex items-center gap-2 text-xl text-slate-600"><LeafIcon className="h-6 w-6 text-brand-600" /> {t.closedThanks}</p>
     </Screen>
   )
 }

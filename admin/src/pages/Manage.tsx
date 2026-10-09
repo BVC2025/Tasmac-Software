@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { download, get, patch, post, type Brand, type MachineRow, type Report, type Role, type User } from '../api'
+import { download, get, patch, post, type Brand, type MachineRow, type Report, type Role, type ServiceWindow, type User } from '../api'
 import { Badge, Btn, ErrorText, Field, inputCls, Modal, SecretBox, Table, fmtTime, rupees, usePoll } from '../ui'
 import { PasswordInput } from '../components/PasswordInput'
 import { BinBar, type PageProps } from './Operations'
@@ -10,6 +10,7 @@ export function Machines({ can }: PageProps) {
   const { data, reload } = usePoll<MachineRow[]>('/machines')
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<MachineRow | null>(null)
+  const [hoursFor, setHoursFor] = useState<MachineRow | null>(null)
   const [secret, setSecret] = useState<{ id: string; api_key: string } | null>(null)
 
   const rotate = async (id: string) => {
@@ -26,13 +27,14 @@ export function Machines({ can }: PageProps) {
     <>
       {can('ADMIN') && <Btn className="mb-4" onClick={() => setAdding(true)}>+ Register machine</Btn>}
       <Table
-        head={['Machine', 'Name', 'Location', 'Enabled', 'State', 'Bin', 'Version', 'Last seen', '']}
+        head={['Machine', 'Name', 'Location', 'Enabled', 'State', 'Service hours', 'Bin', 'Version', 'Last seen', '']}
         rows={(data ?? []).map((m) => [
           <b>{m.id}</b>, m.name, m.location ?? '—',
           m.active ? <span className="text-emerald-700">Yes</span> : <span className="text-red-600">Disabled</span>,
-          <Badge value={m.state} />, <BinBar pct={m.bin_fill_pct} />, m.software_version ?? '—', fmtTime(m.last_seen_at),
+          <Badge value={m.state} />, <HoursText hours={m.service_hours} />, <BinBar pct={m.bin_fill_pct} />, m.software_version ?? '—', fmtTime(m.last_seen_at),
           <div className="flex gap-3">
             {can('OPERATOR') && <Btn variant="link" onClick={() => setEditing(m)}>Edit</Btn>}
+            {can('OPERATOR') && <Btn variant="link" onClick={() => setHoursFor(m)}>Hours</Btn>}
             {can('OPERATOR') && <Btn variant="link" onClick={() => toggle(m)}>{m.active ? 'Disable' : 'Enable'}</Btn>}
             {can('ADMIN') && <Btn variant="link" onClick={() => rotate(m.id)}>Rotate key</Btn>}
           </div>,
@@ -40,12 +42,81 @@ export function Machines({ can }: PageProps) {
       />
       {adding && <MachineForm onClose={() => setAdding(false)} onCreated={(s) => { setSecret(s); reload() }} />}
       {editing && <MachineForm machine={editing} onClose={() => setEditing(null)} onCreated={() => reload()} />}
+      {hoursFor && <ServiceHoursForm machine={hoursFor} onClose={() => setHoursFor(null)} onSaved={reload} />}
       {secret && (
         <Modal title={`API key for ${secret.id}`} onClose={() => setSecret(null)}>
           <SecretBox label="Shown only once. Put it in the machine config (backend.api_key)." value={secret.api_key} />
         </Modal>
       )}
     </>
+  )
+}
+
+/** "10:00" -> "10:00 AM" */
+const clock12 = (hhmm: string) => {
+  const [h, m] = hhmm.split(':').map(Number)
+  return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
+}
+
+function HoursText({ hours }: { hours: ServiceWindow[] | null }) {
+  if (!hours?.length) return <span className="text-slate-500">24 hours</span>
+  return (
+    <span className="text-xs leading-5">
+      {hours.map((w) => <span key={w.start + w.end} className="block font-semibold">{clock12(w.start)} – {clock12(w.end)}</span>)}
+    </span>
+  )
+}
+
+/** When the machine takes bottles (India time). Outside these hours the kiosk shows "Closed". */
+function ServiceHoursForm({ machine, onClose, onSaved }: { machine: MachineRow; onClose: () => void; onSaved: () => void }) {
+  const [always, setAlways] = useState(!machine.service_hours?.length)
+  const [windows, setWindows] = useState<ServiceWindow[]>(machine.service_hours?.length ? machine.service_hours : [{ start: '10:00', end: '22:00' }])
+  const [err, setErr] = useState('')
+  const set = (i: number, k: keyof ServiceWindow, v: string) => setWindows((ws) => ws.map((w, j) => (j === i ? { ...w, [k]: v } : w)))
+  const save = async () => {
+    try {
+      await patch(`/machines/${machine.id}`, { service_hours: always ? [] : windows })
+      onSaved()
+      onClose()
+    } catch (e) {
+      setErr((e as Error).message)
+    }
+  }
+  return (
+    <Modal title={`Service hours · ${machine.id}`} onClose={onClose}>
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">
+          India time, every day. Outside these hours the machine closes its inlet and the screen shows the opening hours.
+          A customer already using the machine at closing time is always finished. The machine picks up a change within a minute.
+        </p>
+        <label className="flex items-center gap-2 text-sm font-semibold">
+          <input type="checkbox" checked={always} onChange={(e) => setAlways(e.target.checked)} className="h-4 w-4" />
+          Open 24 hours
+        </label>
+        {!always && (
+          <div className="space-y-2">
+            {windows.map((w, i) => (
+              <div key={i} className="flex items-end gap-2">
+                <Field label="Opens"><input type="time" className={inputCls} value={w.start} onChange={(e) => set(i, 'start', e.target.value)} /></Field>
+                <Field label="Closes"><input type="time" className={inputCls} value={w.end} onChange={(e) => set(i, 'end', e.target.value)} /></Field>
+                {windows.length > 1 && (
+                  <Btn variant="link" className="mb-2 text-red-700" onClick={() => setWindows((ws) => ws.filter((_, j) => j !== i))}>Remove</Btn>
+                )}
+              </div>
+            ))}
+            {windows.length < 4 && (
+              <Btn variant="secondary" onClick={() => setWindows((ws) => [...ws, { start: '17:00', end: '21:00' }])}>+ Add another time</Btn>
+            )}
+            <p className="text-xs text-slate-500">Closing before opening (e.g. 22:00 → 02:00) means open past midnight.</p>
+          </div>
+        )}
+        <ErrorText>{err}</ErrorText>
+        <div className="flex justify-end gap-2 pt-2">
+          <Btn variant="secondary" onClick={onClose}>Cancel</Btn>
+          <Btn disabled={!always && windows.some((w) => !w.start || !w.end || w.start === w.end)} onClick={save}>Save</Btn>
+        </div>
+      </div>
+    </Modal>
   )
 }
 

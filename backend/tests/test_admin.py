@@ -65,7 +65,7 @@ async def test_create_machine_and_rotate_key(client, admin_h):
     assert r.status_code == 201
     key = r.json()["api_key"]
     hdr = {"X-Machine-Id": "RVM-NEW-01", "X-Api-Key": key}
-    assert (await client.post("/api/machine/v1/heartbeat", json={}, headers=hdr)).status_code == 204
+    assert (await client.post("/api/machine/v1/heartbeat", json={}, headers=hdr)).status_code == 200
     new_key = (await client.post(f"{API}/machines/RVM-NEW-01/rotate-key", headers=admin_h)).json()["api_key"]
     assert new_key != key
     assert (await client.post("/api/machine/v1/heartbeat", json={}, headers=hdr)).status_code == 401

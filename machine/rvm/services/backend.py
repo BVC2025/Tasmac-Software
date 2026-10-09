@@ -71,8 +71,9 @@ class Backend(ABC):
     async def health(self) -> bool: ...
 
     async def heartbeat(self, state: str, bin_fill_pct: int | None, software_version: str,
-                        fault_reason: str | None = None) -> None:
-        """Report machine status to the server (no-op for mocks)."""
+                        fault_reason: str | None = None) -> dict | None:
+        """Report machine status to the server (no-op for mocks). The reply carries settings
+        set in the admin portal, e.g. {"service_hours": [...]}."""
 
     async def classify_qr(self, codes: list[str], record: bool = True) -> dict[str, str | None]:
         """'refund' / 'mfg' / None for each code read from a bottle (default: test-format prefix).

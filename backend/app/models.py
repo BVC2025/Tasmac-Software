@@ -57,6 +57,8 @@ class Machine(Base):
     bin_fill_pct: Mapped[int | None] = mapped_column(Integer)
     software_version: Mapped[str | None] = mapped_column(String(32))
     fault_reason: Mapped[str | None] = mapped_column(String(128))
+    # Service hours (IST): [{"start": "10:00", "end": "11:30"}, ...]; NULL = open 24 hours
+    service_hours: Mapped[list | None] = mapped_column(JSON)
     last_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 

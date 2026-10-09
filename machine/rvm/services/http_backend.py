@@ -91,8 +91,8 @@ class HttpBackend(Backend):
             return False
 
     async def heartbeat(self, state: str, bin_fill_pct: int | None, software_version: str,
-                        fault_reason: str | None = None) -> None:
-        await self._request("POST", "/heartbeat", {
+                        fault_reason: str | None = None) -> dict | None:
+        return await self._request("POST", "/heartbeat", {
             "state": state, "bin_fill_pct": bin_fill_pct, "software_version": software_version,
             "fault_reason": (fault_reason or "")[:128] or None})
 

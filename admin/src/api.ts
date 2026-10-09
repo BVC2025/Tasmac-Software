@@ -93,7 +93,12 @@ export interface MachineRow {
   bin_fill_pct: number | null
   software_version: string | null
   fault_reason: string | null
+  service_hours: ServiceWindow[] | null // null = open 24 hours (India time)
   last_seen_at: string | null
+}
+export interface ServiceWindow {
+  start: string // "HH:MM"
+  end: string
 }
 export interface TxnRow {
   id: string

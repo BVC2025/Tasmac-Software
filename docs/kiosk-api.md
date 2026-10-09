@@ -41,6 +41,7 @@ A session is one customer with up to 3 bottles (one per inlet). Every bottle is 
 | `PAYING`, `ACCEPTING` | Processing payment |
 | `REJECTING` | Bottles handed back, with the reason (per bottle or for the whole batch, e.g. payment failed) |
 | `OUT_OF_SERVICE` | Machine unavailable |
+| `CLOSED` | Outside service hours (`hours`: [{start, end}] India time, `next_open`: ISO time or null). Inlets closed; a customer already inside is finished first |
 
 ## Message codes
 

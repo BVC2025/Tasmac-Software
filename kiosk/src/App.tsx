@@ -4,7 +4,7 @@ import { DEV_TOGGLE_EVENT, DevPanel } from './components/DevPanel'
 import { SpeakerIcon, SpeakerOffIcon, WifiIcon, WifiOffIcon } from './components/Icons'
 import { LangProvider, useLang } from './i18n'
 import { Confirm, RefundMethod, Result } from './screens/RefundFlow'
-import { Checking, Connecting, isCheckingState, OutOfService, Paying, Ready, Rejecting, Starting, Welcome } from './screens/StatusScreens'
+import { Checking, Closed, Connecting, isCheckingState, OutOfService, Paying, Ready, Rejecting, Starting, Welcome } from './screens/StatusScreens'
 import { useMachine, type MachineView } from './useMachine'
 import { cueFor, rejectClip, useVoice, VoiceProvider } from './voice'
 
@@ -101,7 +101,11 @@ function Body({ view, clearResult, welcome, onStart }: {
   if (welcome) return <Welcome onStart={onStart} />
   if (s === 'OUT_OF_SERVICE') return <OutOfService reason={view.fault ?? view.stateData.reason} showReason={view.simulation} />
   // Hold the outcome screen for a few seconds after the session ends
-  if (view.result && (s === 'READY' || s === 'REJECTING')) return <Result result={view.result} confirm={view.confirm} onDone={clearResult} />
+  // (also when service hours ended during that customer: CLOSED follows the session)
+  if (view.result && (s === 'READY' || s === 'REJECTING' || s === 'CLOSED'))
+    return <Result result={view.result} confirm={view.confirm} onDone={clearResult} />
+  if (s === 'CLOSED') return <Closed hours={view.stateData.hours ?? []} nextOpen={view.stateData.next_open} />
+
   if (s === 'STARTING' || s === 'HEALTH_CHECK') return <Starting />
   if (s === 'READY') return <Ready lanes={view.laneCount} />
   if (isCheckingState(s)) return <Checking view={view} />

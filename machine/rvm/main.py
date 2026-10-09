@@ -79,8 +79,10 @@ async def backend_housekeeping(cfg: MachineConfig, orch: Orchestrator) -> None:
     backend = orch.backend
     while True:
         try:
-            await backend.heartbeat(orch.state.value, orch.plc.status.bin_fill_pct, cfg.software_version,
-                                    orch.fault_reason)
+            reply = await backend.heartbeat(orch.state.value, orch.plc.status.bin_fill_pct, cfg.software_version,
+                                            orch.fault_reason)
+            if isinstance(reply, dict) and "service_hours" in reply:
+                orch.set_service_hours(reply["service_hours"])
             if isinstance(backend, HttpBackend) and backend.outbox.count():
                 sent = await backend.flush_outbox()
                 if sent:

@@ -223,7 +223,7 @@ export function cueFor(view: MachineView): { key: string; clip: string; queue?: 
   const s = view.state
   if (!view.connected) return null
   if (s === 'OUT_OF_SERVICE') return { key: 'oos', clip: 'out_of_service' }
-  if (view.result && (s === 'READY' || s === 'REJECTING')) {
+  if (view.result && (s === 'READY' || s === 'REJECTING' || s === 'CLOSED')) {
     if (view.result.outcome === 'ACCEPTED') {
       const pending = view.result.final?.code === 'REFUND_PENDING'
       return { key: `result-${view.stateAt}`, clip: pending ? 'pending' : 'success' }
