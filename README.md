@@ -113,7 +113,7 @@ cd kiosk && npm install && npm run dev                                          
 cd admin && npm install && npm run dev                                           # http://localhost:5174 (admin user from create-admin)
 ```
 
-In the kiosk, the **DEV** button (bottom right, simulation only) inserts test bottles, simulates a UPI QR
+In the kiosk, the hidden developer panel (simulation only; open with **Ctrl+Alt+D** or 5 quick taps on the TASMAC title, close with Esc) inserts test bottles, simulates a UPI QR
 scan or spoken number, presses the e-stop, refreshes test QR codes and tests real bottle QRs (below).
 Without a browser: `cd machine && .venv/Scripts/python tools/kiosk_smoke.py --bottles 13`.
 

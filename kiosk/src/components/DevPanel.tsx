@@ -7,7 +7,13 @@ import { RealQrTest } from './RealQrTest'
 const SAMPLE_QR = 'upi://pay?pa=ravi.kumar@okaxis&pn=Ravi%20Kumar&cu=INR'
 const SAMPLE_VOICE = 'ஒன்பது எட்டு ஏழு ஆறு ஐந்து நான்கு மூன்று இரண்டு ஒன்று பூஜ்ஜியம்'
 
-/** Simulation-only tools: insert test bottles, fake QR/voice input, e-stop, session log. */
+/** Window event that opens / closes the panel (the hidden tap gesture in the header sends it). */
+export const DEV_TOGGLE_EVENT = 'kiosk:dev-toggle'
+
+/**
+ * Simulation-only tools: insert test bottles, fake QR/voice input, e-stop, session log.
+ * Hidden from customers: open with Ctrl+Alt+D, or tap the TASMAC title 5 times quickly.
+ */
 export function DevPanel({ view }: { view: MachineView }) {
   const [open, setOpen] = useState(false)
   const [bottles, setBottles] = useState<SimBottle[]>([])
@@ -19,6 +25,23 @@ export function DevPanel({ view }: { view: MachineView }) {
   const [lane, setLane] = useState<number | undefined>(undefined)
   const [batch, setBatch] = useState<string[]>(['happy-path-upi', 'damaged-bottle', 'happy-path-mobile'])
   const laneNumbers = Array.from({ length: view.laneCount }, (_, i) => i + 1)
+
+  // Hidden opener: Ctrl+Alt+D (keyboard) or the header tap gesture (touchscreen)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.altKey && e.code === 'KeyD') {
+        e.preventDefault()
+        setOpen((o) => !o)
+      }
+    }
+    const onToggle = () => setOpen((o) => !o)
+    window.addEventListener('keydown', onKey)
+    window.addEventListener(DEV_TOGGLE_EVENT, onToggle)
+    return () => {
+      window.removeEventListener('keydown', onKey)
+      window.removeEventListener(DEV_TOGGLE_EVENT, onToggle)
+    }
+  }, [])
 
   // Esc closes the panel
   useEffect(() => {
@@ -55,16 +78,7 @@ export function DevPanel({ view }: { view: MachineView }) {
     }
   }
 
-  if (!open) {
-    return (
-      <button
-        onClick={() => setOpen(true)}
-        className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-amber-300 shadow-lg"
-      >
-        <WrenchIcon className="h-5 w-5" /> DEV
-      </button>
-    )
-  }
+  if (!open) return null
 
   const input = 'w-full rounded-lg bg-slate-800 px-3 py-2 font-mono text-xs text-slate-100 ring-1 ring-slate-700'
   const btn = 'rounded-lg bg-slate-700 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-600'
@@ -73,7 +87,10 @@ export function DevPanel({ view }: { view: MachineView }) {
     <aside className="fixed top-0 right-0 bottom-0 z-50 flex w-96 flex-col gap-4 overflow-y-auto bg-slate-900 p-4 text-sm text-slate-200 shadow-2xl select-text">
       {/* stays at the top while the panel scrolls, so it can always be closed */}
       <div className="sticky -top-4 z-10 -mx-4 -mt-4 flex items-center justify-between border-b border-slate-700 bg-slate-900/95 px-4 py-3 backdrop-blur">
-        <h2 className="font-bold text-amber-300">Developer panel (simulation)</h2>
+        <h2 className="flex items-center gap-2 font-bold text-amber-300">
+          <WrenchIcon className="h-5 w-5" /> Developer panel
+          <span className="font-normal text-slate-400">· Ctrl+Alt+D</span>
+        </h2>
         <button
           onClick={() => setOpen(false)}
           aria-label="Close"

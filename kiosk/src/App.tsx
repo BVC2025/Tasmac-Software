@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Clock } from './components/Clock'
-import { DevPanel } from './components/DevPanel'
+import { DEV_TOGGLE_EVENT, DevPanel } from './components/DevPanel'
 import { SpeakerIcon, SpeakerOffIcon, WifiIcon, WifiOffIcon } from './components/Icons'
 import { LangProvider, useLang } from './i18n'
 import { Confirm, RefundMethod, Result } from './screens/RefundFlow'
@@ -23,8 +23,23 @@ function VoiceToggle() {
   )
 }
 
+/** 5 quick taps (within 3 s) on the title toggle the hidden developer panel (simulation only). */
+function useSecretTaps(enabled: boolean) {
+  const taps = useRef<number[]>([])
+  return () => {
+    if (!enabled) return
+    const now = Date.now()
+    taps.current = [...taps.current.filter((t) => now - t < 3000), now]
+    if (taps.current.length >= 5) {
+      taps.current = []
+      window.dispatchEvent(new Event(DEV_TOGGLE_EVENT))
+    }
+  }
+}
+
 function Header({ view }: { view: MachineView }) {
   const { t, lang, setLang } = useLang()
+  const secretTap = useSecretTaps(view.simulation)
   return (
     <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 bg-brand-800 px-6 py-3 text-white shadow-lg">
       <div className="flex items-center gap-3">
@@ -33,7 +48,7 @@ function Header({ view }: { view: MachineView }) {
         </span>
         <VoiceToggle />
       </div>
-      <div className="text-center">
+      <div className="text-center" onClick={secretTap}>
         <p className="text-3xl leading-none font-extrabold tracking-[0.18em]">TASMAC</p>
         <p className="mt-1 text-sm opacity-75">
           {t.appTitle} · {view.machineId || '—'}
