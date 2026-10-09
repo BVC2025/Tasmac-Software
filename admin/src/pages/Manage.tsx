@@ -58,6 +58,36 @@ const clock12 = (hhmm: string) => {
   return `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`
 }
 
+const MINUTES = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0'))
+
+/** 12-hour time picker (hour, minute, AM/PM); value stays "HH:MM" (24 h) for the server. */
+function Time12({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const [h24, m] = value.split(':').map(Number)
+  const ampm = h24 < 12 ? 'AM' : 'PM'
+  const h12 = ((h24 + 11) % 12) + 1
+  const emit = (h: number, min: number, ap: string) => {
+    const hh = (h % 12) + (ap === 'PM' ? 12 : 0)
+    onChange(`${String(hh).padStart(2, '0')}:${String(min).padStart(2, '0')}`)
+  }
+  const sel = 'rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm font-semibold focus:border-brand-600 focus:outline-none'
+  const minutes = MINUTES.includes(String(m).padStart(2, '0')) ? MINUTES : [...MINUTES, String(m).padStart(2, '0')].sort()
+  return (
+    <div className="flex items-center gap-1">
+      <select aria-label="Hour" className={sel} value={h12} onChange={(e) => emit(Number(e.target.value), m, ampm)}>
+        {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => <option key={h} value={h}>{h}</option>)}
+      </select>
+      <span className="font-bold text-slate-500">:</span>
+      <select aria-label="Minute" className={sel} value={String(m).padStart(2, '0')} onChange={(e) => emit(h12, Number(e.target.value), ampm)}>
+        {minutes.map((mm) => <option key={mm} value={mm}>{mm}</option>)}
+      </select>
+      <select aria-label="AM or PM" className={sel} value={ampm} onChange={(e) => emit(h12, m, e.target.value)}>
+        <option value="AM">AM</option>
+        <option value="PM">PM</option>
+      </select>
+    </div>
+  )
+}
+
 function HoursText({ hours }: { hours: ServiceWindow[] | null }) {
   if (!hours?.length) return <span className="text-slate-500">24 hours</span>
   return (
@@ -71,6 +101,7 @@ function HoursText({ hours }: { hours: ServiceWindow[] | null }) {
 function ServiceHoursForm({ machine, onClose, onSaved }: { machine: MachineRow; onClose: () => void; onSaved: () => void }) {
   const [always, setAlways] = useState(!machine.service_hours?.length)
   const [windows, setWindows] = useState<ServiceWindow[]>(machine.service_hours?.length ? machine.service_hours : [{ start: '10:00', end: '22:00' }])
+  const fmt = (w: ServiceWindow) => `${clock12(w.start)} – ${clock12(w.end)}`
   const [err, setErr] = useState('')
   const set = (i: number, k: keyof ServiceWindow, v: string) => setWindows((ws) => ws.map((w, j) => (j === i ? { ...w, [k]: v } : w)))
   const save = async () => {
@@ -97,8 +128,9 @@ function ServiceHoursForm({ machine, onClose, onSaved }: { machine: MachineRow; 
           <div className="space-y-2">
             {windows.map((w, i) => (
               <div key={i} className="flex items-end gap-2">
-                <Field label="Opens"><input type="time" className={inputCls} value={w.start} onChange={(e) => set(i, 'start', e.target.value)} /></Field>
-                <Field label="Closes"><input type="time" className={inputCls} value={w.end} onChange={(e) => set(i, 'end', e.target.value)} /></Field>
+                <Field label="Opens"><Time12 value={w.start} onChange={(v) => set(i, 'start', v)} /></Field>
+                <span className="mb-2.5 text-slate-400">→</span>
+                <Field label="Closes"><Time12 value={w.end} onChange={(v) => set(i, 'end', v)} /></Field>
                 {windows.length > 1 && (
                   <Btn variant="link" className="mb-2 text-red-700" onClick={() => setWindows((ws) => ws.filter((_, j) => j !== i))}>Remove</Btn>
                 )}
@@ -107,8 +139,13 @@ function ServiceHoursForm({ machine, onClose, onSaved }: { machine: MachineRow; 
             {windows.length < 4 && (
               <Btn variant="secondary" onClick={() => setWindows((ws) => [...ws, { start: '17:00', end: '21:00' }])}>+ Add another time</Btn>
             )}
-            <p className="text-xs text-slate-500">Closing before opening (e.g. 22:00 → 02:00) means open past midnight.</p>
+            <p className="text-xs text-slate-500">Closing before opening (e.g. 10:00 PM → 2:00 AM) means open past midnight.</p>
           </div>
+        )}
+        {!always && (
+          <p className="rounded-lg bg-brand-50 px-3 py-2 text-sm text-brand-800">
+            Open every day: <b>{windows.map(fmt).join(', ')}</b>
+          </p>
         )}
         <ErrorText>{err}</ErrorText>
         <div className="flex justify-end gap-2 pt-2">
