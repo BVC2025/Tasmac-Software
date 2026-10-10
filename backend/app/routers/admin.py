@@ -6,6 +6,7 @@ re-check, enable/disable machines), ADMIN manages machines, keys and brands.
 
 import csv
 import io
+import json
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -377,7 +378,8 @@ async def evidence_photo(session_id: str, lane: int, db: AsyncSession = Depends(
     return Response(e.image, media_type=e.content_type, headers={
         "Cache-Control": "private, max-age=300",
         "X-Evidence-Reason": e.reason, "X-Evidence-At": e.created_at.isoformat(),
-        "Access-Control-Expose-Headers": "X-Evidence-Reason, X-Evidence-At"})
+        "X-Evidence-Box": json.dumps(e.box) if e.box else "",
+        "Access-Control-Expose-Headers": "X-Evidence-Reason, X-Evidence-At, X-Evidence-Box"})
 
 
 @router.get("/sms")

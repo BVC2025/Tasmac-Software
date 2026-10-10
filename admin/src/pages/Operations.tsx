@@ -1,6 +1,9 @@
 import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import { DailyChart } from '../components/DailyChart'
-import { AlertIcon, BottleIcon, CheckCircleIcon, ClockIcon, ReturnIcon, RupeeIcon, WifiIcon, XCircleIcon } from '../components/Icons'
+import {
+  AlertIcon, BottleIcon, CameraIcon, CheckCircleIcon, ClockIcon, CopyIcon, DownloadIcon, ExpandIcon, ReturnIcon, RupeeIcon, WifiIcon,
+  XCircleIcon,
+} from '../components/Icons'
 import { fetchImage, post, type AlertRow, type AuditRow, type ClaimRow, type MachineRow, type SessionRow, type SmsRow, type Stats, type TxnRow } from '../api'
 import { Badge, Btn, ErrorText, Field, inputCls, Modal, mono, Table, fmtTime, rupees, usePoll } from '../ui'
 
@@ -271,38 +274,141 @@ export function Transactions({ can }: PageProps) {
   )
 }
 
-/** The machine camera's photo of a rejected bottle (proof of the rejection). */
+const EVIDENCE_REASON: Record<string, { title: string; detail: string }> = {
+  BOTTLE_DAMAGED: { title: 'Bottle damaged', detail: 'The camera found damage on the bottle (crack, chip or broken glass).' },
+  BOTTLE_FOREIGN: { title: 'Not an accepted bottle', detail: 'The item in the inlet is not a bottle the machine accepts.' },
+}
+
+function ReportRow({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="flex items-start justify-between gap-4 border-b border-slate-100 py-2.5 last:border-0">
+      <dt className="shrink-0 text-xs font-semibold tracking-wide text-slate-500 uppercase">{label}</dt>
+      <dd className="text-right text-sm font-semibold text-slate-800">{children}</dd>
+    </div>
+  )
+}
+
+/** The machine camera's photo of a rejected bottle: a one-page inspection report (proof of the rejection). */
 function EvidenceModal({ session, lane, onClose }: { session: SessionRow; lane: number; onClose: () => void }) {
-  const [img, setImg] = useState<{ url: string; reason: string; at: string } | null>(null)
+  const [img, setImg] = useState<{ url: string; reason: string; at: string; box: number[] | null } | null>(null)
   const [err, setErr] = useState('')
+  const [copied, setCopied] = useState(false)
+  const { data: machines } = usePoll<MachineRow[]>('/machines', 0)
+  const machine = machines?.find((m) => m.id === session.machine_id)
+
   useEffect(() => {
     let url = ''
     fetchImage(`/sessions/${session.id}/bottles/${lane}/evidence`).then(
       (r) => {
         url = r.url
-        setImg({ url: r.url, reason: r.headers.get('X-Evidence-Reason') ?? '', at: r.headers.get('X-Evidence-At') ?? '' })
+        const box = r.headers.get('X-Evidence-Box')
+        setImg({ url: r.url, reason: r.headers.get('X-Evidence-Reason') ?? '', at: r.headers.get('X-Evidence-At') ?? '', box: box ? JSON.parse(box) : null })
       },
       (e) => setErr((e as Error).message),
     )
     return () => { if (url) URL.revokeObjectURL(url) }
   }, [session.id, lane])
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose()
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
+
+  const info = EVIDENCE_REASON[img?.reason ?? ''] ?? { title: img?.reason ?? 'Rejected', detail: 'The machine camera rejected this bottle.' }
+  const at = img?.at ? new Date(img.at) : null
+  const ist = (o: Intl.DateTimeFormatOptions) => at?.toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', ...o }) ?? '—'
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(session.id)
+      setCopied(true)
+      window.setTimeout(() => setCopied(false), 1500)
+    } catch { /* clipboard blocked */ }
+  }
+
   return (
-    <Modal title={`Rejection evidence · bottle ${lane}`} onClose={onClose}>
-      {img ? (
-        <div className="space-y-3">
-          <img src={img.url} alt="Rejected bottle" className="w-full rounded-lg ring-1 ring-slate-200" />
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
-            <dt className="text-slate-500">Reason</dt><dd><Badge value={img.reason} /></dd>
-            <dt className="text-slate-500">Taken</dt><dd>{fmtTime(img.at)}</dd>
-            <dt className="text-slate-500">Machine</dt><dd>{session.machine_id}</dd>
-            <dt className="text-slate-500">Session</dt><dd>{mono(session.id)}</dd>
-          </dl>
-          <a href={img.url} download={`evidence-${session.id}-${lane}.jpg`} className="inline-block text-sm font-semibold text-brand-700 hover:underline">
-            Download photo
-          </a>
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        {/* header */}
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 bg-slate-50 px-6 py-4">
+          <div className="flex items-center gap-3">
+            <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-red-100 text-red-600">
+              <CameraIcon className="h-5 w-5" />
+            </span>
+            <div>
+              <h2 className="text-lg font-bold text-slate-900">Rejection evidence</h2>
+              <p className="text-xs text-slate-500">Camera inspection report · bottle {lane} · {session.machine_id}</p>
+            </div>
+          </div>
+          <button onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-2xl leading-none text-slate-400 hover:bg-slate-200 hover:text-slate-700">×</button>
         </div>
-      ) : err ? <ErrorText>{err}</ErrorText> : <p className="text-sm text-slate-500">Loading…</p>}
-    </Modal>
+
+        <div className="grid flex-1 gap-0 overflow-y-auto md:grid-cols-[1.45fr_1fr]">
+          {/* photo */}
+          <div className="flex flex-col bg-slate-950 p-5">
+            {img ? (
+              <a href={img.url} target="_blank" rel="noreferrer" className="group relative block overflow-hidden rounded-xl ring-1 ring-white/10" title="Open full size">
+                <img src={img.url} alt="Rejected bottle" className="w-full object-contain" />
+                <span className="absolute top-3 right-3 flex items-center gap-1.5 rounded-lg bg-black/60 px-2.5 py-1.5 text-xs font-semibold text-white opacity-0 transition group-hover:opacity-100">
+                  <ExpandIcon className="h-4 w-4" /> Full size
+                </span>
+              </a>
+            ) : err ? (
+              <div className="flex aspect-[4/3] items-center justify-center rounded-xl bg-slate-900 p-6 text-center text-sm text-red-300">{err}</div>
+            ) : (
+              <div className="aspect-[4/3] animate-pulse rounded-xl bg-slate-800" />
+            )}
+            <p className="mt-3 flex items-center gap-2 text-xs text-slate-400">
+              <span className="inline-block h-3 w-3 rounded-sm border-2 border-red-500" /> Red box = area the inspection flagged
+            </p>
+          </div>
+
+          {/* details */}
+          <div className="flex flex-col p-6">
+            <div className="rounded-xl bg-red-50 p-4 ring-1 ring-red-100">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-red-600 px-2.5 py-0.5 text-xs font-bold tracking-wide text-white uppercase">
+                <XCircleIcon className="h-3.5 w-3.5" /> Rejected
+              </span>
+              <p className="mt-2 text-xl font-extrabold text-red-900">{info.title}</p>
+              <p className="mt-1 text-sm text-red-800/80">{info.detail}</p>
+            </div>
+
+            <dl className="mt-5">
+              <ReportRow label="Date">{ist({ day: '2-digit', month: 'short', year: 'numeric' })}</ReportRow>
+              <ReportRow label="Time">{at ? `${ist({ hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }).toUpperCase()} IST` : '—'}</ReportRow>
+              <ReportRow label="Machine">
+                {session.machine_id}
+                {machine && <span className="block text-xs font-normal text-slate-500">{machine.name}{machine.location ? ` · ${machine.location}` : ''}</span>}
+              </ReportRow>
+              <ReportRow label="Inlet">{lane}</ReportRow>
+              <ReportRow label="Damaged area">
+                {img?.box ? `${Math.round(img.box[2] * 100)}% × ${Math.round(img.box[3] * 100)}% of frame` : 'Whole item'}
+              </ReportRow>
+              <ReportRow label="Session outcome"><Badge value={session.outcome} /></ReportRow>
+              <ReportRow label="Session ID">
+                <button onClick={copy} className="inline-flex items-center gap-1.5 font-mono text-xs text-slate-700 hover:text-brand-700" title="Copy session ID">
+                  {session.id.slice(0, 16)}… <CopyIcon className="h-3.5 w-3.5" />
+                </button>
+                {copied && <span className="block text-xs font-normal text-emerald-600">Copied</span>}
+              </ReportRow>
+            </dl>
+
+            <div className="mt-auto flex gap-2 pt-6">
+              {img && (
+                <a href={img.url} download={`evidence-${session.machine_id}-${session.id.slice(0, 8)}-bottle${lane}.jpg`}
+                  className="inline-flex flex-1 items-center justify-center gap-2 rounded-lg bg-brand-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-brand-600">
+                  <DownloadIcon className="h-4 w-4" /> Download photo
+                </a>
+              )}
+              <Btn variant="secondary" onClick={onClose}>Close</Btn>
+            </div>
+            <p className="mt-3 text-[11px] leading-snug text-slate-400">
+              Stored with the session as proof of the rejection. Simulation pictures are marked "SIMULATION - NOT A REAL PHOTO".
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
   )
 }
 
