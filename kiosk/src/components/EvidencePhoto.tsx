@@ -9,15 +9,17 @@ export function EvidencePhoto({ sessionId, lane, compact = false }: { sessionId:
   const [failed, setFailed] = useState(false)
   if (failed) return null
   return (
-    <figure className={`w-full overflow-hidden rounded-3xl bg-slate-900 shadow-xl ring-4 ring-red-200 ${compact ? 'max-w-xs' : 'max-w-xl'}`}>
-      <img
-        src={`${MACHINE_API}/api/evidence/${encodeURIComponent(sessionId)}/${lane}`}
-        alt={t.evidenceCaption}
-        className="w-full object-contain"
-        onError={() => setFailed(true)}
-      />
-      <figcaption className="flex items-center justify-center gap-2 bg-red-50 px-4 py-2 text-base font-semibold text-red-800">
-        <CameraIcon className="h-5 w-5" /> {t.evidenceCaption}
+    <figure className={`w-full ${compact ? 'max-w-xs' : 'max-w-2xl'}`}>
+      <div className="overflow-hidden rounded-3xl bg-slate-900 shadow-2xl ring-4 ring-red-100">
+        <img
+          src={`${MACHINE_API}/api/evidence/${encodeURIComponent(sessionId)}/${lane}`}
+          alt={t.evidenceCaption}
+          className="block w-full object-contain"
+          onError={() => setFailed(true)}
+        />
+      </div>
+      <figcaption className="mt-4 flex items-center justify-center gap-2 text-lg font-semibold text-red-700">
+        <CameraIcon className="h-6 w-6" /> {t.evidenceCaption}
       </figcaption>
     </figure>
   )

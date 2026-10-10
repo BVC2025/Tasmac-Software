@@ -61,7 +61,7 @@ class MockInspector(BottleInspector):
         if cond == "ok":
             return InspectionResult(ok=True, confidence=0.97)
         # where the damage is (normalised x, y, w, h) and in which frame, as a real model would report it
-        details = {"box": [0.40, 0.46, 0.22, 0.2], "frame": 1} if cond == "damaged" else {"frame": 0}
+        details = {"box": [0.395, 0.488, 0.221, 0.209], "frame": 1} if cond == "damaged" else {"frame": 0}
         return InspectionResult(ok=False, reason=cond.upper(), confidence=0.93, details=details)
 
 

@@ -1,8 +1,8 @@
 """Evidence photo for a bottle rejected by the camera inspection (damaged / not a bottle).
 
 With a real camera the photo is the inspection frame itself, with the damaged area
-boxed in red. In simulation (no camera) a clearly marked SIMULATION picture is drawn,
-so it can never be mistaken for a real photo.
+boxed in red. In simulation (no camera) a sample photo of a cracked bottle is used,
+tagged SIMULATION so a stored record is never mistaken for a real inspection.
 
 The picture is shown to the customer on the kiosk and stored on the server, so every
 "bottle damaged" decision has proof.
@@ -22,6 +22,9 @@ from .vision import Frame, InspectionResult
 log = logging.getLogger(__name__)
 
 RED = (220, 38, 38)
+SAMPLE_DAMAGED = Path(__file__).resolve().parents[1] / "assets" / "sim_damaged_bottle.jpg"
+# where the crack is in the sample photo (normalised x, y, w, h)
+SAMPLE_DAMAGED_BOX = [0.395, 0.488, 0.221, 0.209]
 LABEL = {"DAMAGED": "BOTTLE DAMAGED", "FOREIGN": "NOT AN ACCEPTED BOTTLE"}
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
@@ -43,6 +46,16 @@ def _frame_image(frames: list[Frame], index: int | None) -> Image.Image | None:
     f = usable[index] if index is not None and 0 <= index < len(usable) else usable[-1]
     rgb = f.image[:, :, ::-1] if f.image.ndim == 3 else f.image
     return Image.fromarray(rgb).convert("RGB")
+
+
+def _sample_photo(reason: str) -> Image.Image | None:
+    """Sample photo of a cracked bottle for simulated "damaged" rejections."""
+    if reason == "DAMAGED" and SAMPLE_DAMAGED.exists():
+        try:
+            return Image.open(SAMPLE_DAMAGED).convert("RGB")
+        except OSError as e:
+            log.warning("Sample evidence photo unreadable: %s", e)
+    return None
 
 
 def _simulated_bottle(w: int = 640, h: int = 480) -> Image.Image:
@@ -71,27 +84,40 @@ def make_evidence(frames: list[Frame], result: InspectionResult, lane: int, simu
     """JPEG with the damaged area boxed and a caption (reason, inlet, time)."""
     img = _frame_image(frames, result.details.get("frame"))
     fake = img is None
-    if fake:
-        img = _simulated_bottle()
+    box = result.details.get("box")   # normalised [x, y, w, h] of the damaged area, if the inspector found one
+    sample = _sample_photo(result.reason) if fake else None
+    if sample is not None:
+        img, box, drawn = sample, SAMPLE_DAMAGED_BOX, True   # the crack is in the photo itself
+    elif fake:
+        img, drawn = _simulated_bottle(), False
+    else:
+        drawn = True
     img.thumbnail((960, 960))
     w, h = img.size
     d = ImageDraw.Draw(img)
-    box = result.details.get("box")   # normalised [x, y, w, h] of the damaged area, if the inspector found one
+    line = max(3, w // 200)
     if box:
         x, y, bw, bh = int(box[0] * w), int(box[1] * h), int(box[2] * w), int(box[3] * h)
-        if fake:
+        if not drawn:
             _draw_crack(d, x, y, bw, bh)
-        d.rectangle([x, y, x + bw, y + bh], outline=RED, width=max(3, w // 160))
+        d.rectangle([x, y, x + bw, y + bh], outline=RED, width=line)
     else:
-        d.rectangle([2, 2, w - 3, h - 3], outline=RED, width=max(3, w // 160))
+        d.rectangle([2, 2, w - 3, h - 3], outline=RED, width=line)
 
-    bar = max(34, h // 12)
+    # caption bar: what, where, when
+    bar = max(36, h // 13)
     d.rectangle([0, h - bar, w, h], fill=(0, 0, 0))
     when = datetime.now(IST).strftime("%d %b %Y %I:%M:%S %p IST")
     text = f"{LABEL.get(result.reason, 'REJECTED')} · inlet {lane} · {when}"
-    d.text((10, h - bar + bar // 4), text, fill=(255, 255, 255), font=_font(max(14, bar // 2)))
+    d.text((14, h - bar + bar // 4), text, fill=(255, 255, 255), font=_font(max(14, bar // 2)))
     if fake or simulated:
-        d.text((10, 8), "SIMULATION - NOT A REAL PHOTO", fill=(250, 204, 21), font=_font(max(14, h // 24)))
+        # small tag, so a stored record is never mistaken for a real inspection photo
+        f = _font(max(11, h // 40))
+        tag = "SIMULATION"
+        tw = d.textlength(tag, font=f)
+        pad = max(5, h // 90)
+        d.rounded_rectangle([w - tw - 3 * pad - 10, 10, w - 10, 10 + f.size + 2 * pad], radius=pad, fill=(245, 158, 11))
+        d.text((w - tw - 1.5 * pad - 10, 10 + pad * 0.8), tag, fill=(0, 0, 0), font=f)
 
     out = io.BytesIO()
     img.save(out, "JPEG", quality=82)
