@@ -4,6 +4,7 @@ import { Banner, Countdown, DetailCard, ProgressBar, ScanFrame, Screen, Spinner,
 import { AlertIcon, ArrowRightIcon, BottleIcon, CheckIcon, ClockIcon, LeafIcon, MicIcon, QrIcon, XIcon } from '../components/Icons'
 import { InsertAnimation } from '../components/InsertAnimation'
 import { RealBottle } from '../components/BottleArt'
+import { EvidencePhoto } from '../components/EvidencePhoto'
 import { useLang } from '../i18n'
 import type { LaneView, MachineView } from '../useMachine'
 
@@ -205,6 +206,7 @@ function BottleSteps({ lane }: { lane: LaneView }) {
       <>
         <StatusBadge tone="error"><XIcon className="h-20 w-20" strokeWidth={3} /></StatusBadge>
         <Title sub={reason(lane.reason)}>{t.returnedTitle}</Title>
+        {lane.evidence && lane.session_id && <div className="mb-6 flex w-full justify-center"><EvidencePhoto sessionId={lane.session_id} lane={lane.lane} /></div>}
         <TakeBottle />
       </>
     )
@@ -454,6 +456,13 @@ export function Rejecting({ reason, lanes }: { reason?: string; lanes: LaneView[
       <Title sub={lanes.length > 1 && lanes.every((l) => l.step === 'REJECTED') ? undefined : reasonText(reason)}>
         {reason === 'PAYOUT_FAILED' ? t.refundFailed : t.returnedTitle}
       </Title>
+      {lanes.some((l) => l.evidence && l.session_id) && (
+        <div className="mb-6 flex w-full flex-wrap justify-center gap-4">
+          {lanes.filter((l) => l.evidence && l.session_id).map((l) => (
+            <EvidencePhoto key={l.lane} sessionId={l.session_id!} lane={l.lane} compact={lanes.length > 1} />
+          ))}
+        </div>
+      )}
       {lanes.length > 1 && (
         <div className="mb-6 w-full">
           <BatchSummary lanes={lanes} handingBack={reason} />

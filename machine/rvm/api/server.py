@@ -23,6 +23,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -224,6 +225,14 @@ def create_app(orch: Orchestrator, bus: EventBus, customer: WebCustomer | None,
             return await orch.backend.classify_qr(texts, record)
         except Exception:
             return {t: qr_codec.classify(t) for t in texts}
+
+    @app.get("/api/evidence/{session_id}/{lane}")
+    async def evidence(session_id: str, lane: int):
+        """Photo of a bottle the camera rejected (shown on the kiosk's rejection screen)."""
+        p = orch.evidence.path(session_id, lane)
+        if p is None or not p.exists():
+            raise HTTPException(404, "No evidence photo")
+        return FileResponse(p, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
     @app.post("/api/qr/decode")
     async def qr_decode(request: Request):

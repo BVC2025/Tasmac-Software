@@ -56,6 +56,14 @@ export async function download(path: string, filename: string) {
   URL.revokeObjectURL(url)
 }
 
+/** An image endpoint (needs the login token, so it is fetched, not linked). */
+export async function fetchImage(path: string): Promise<{ url: string; headers: Headers }> {
+  const res = await fetch(BASE + path, { headers: { Authorization: `Bearer ${token}` } })
+  if (res.status === 401 && token) onUnauthorized()
+  if (!res.ok) throw new ApiError(res.status, res.status === 404 ? 'No photo for this bottle' : res.statusText)
+  return { url: URL.createObjectURL(await res.blob()), headers: res.headers }
+}
+
 export async function login(username: string, password: string) {
   return call<{ access_token: string; user: User }>('POST', '/auth/login', { username, password })
 }
@@ -116,6 +124,15 @@ export interface TxnRow {
   created_at: string
   completed_at: string | null
 }
+export interface SessionBottleRow {
+  lane: number
+  status: string
+  reason: string | null
+  brand: string | null
+  refund_serial: string | null
+  mfg_serial: string | null
+  evidence: boolean // machine camera photo of why it was rejected
+}
 export interface SessionRow {
   id: string
   machine_id: string
@@ -126,6 +143,7 @@ export interface SessionRow {
   reason: string | null
   started_at: string
   ended_at: string | null
+  bottles: SessionBottleRow[]
 }
 export interface ClaimRow {
   refund_serial: string

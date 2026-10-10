@@ -6,6 +6,7 @@ local SQLite outbox and are retried in the background.
 """
 
 import asyncio
+import base64
 import json
 import logging
 import sqlite3
@@ -121,6 +122,13 @@ class HttpBackend(Backend):
 
     async def bottle_rejected(self, session_id: str, lane: int, reason: str) -> None:
         await self._notify(f"/sessions/{session_id}/bottles/{lane}/rejected", {"reason": reason[:64]})
+
+    async def bottle_evidence(self, session_id: str, lane: int, reason: str, jpeg: bytes,
+                              box: list[float] | None = None) -> None:
+        # queued in the outbox like the other notifications when the server is unreachable
+        await self._notify(f"/sessions/{session_id}/bottles/{lane}/evidence", {
+            "reason": reason[:64], "content_type": "image/jpeg", "box": box,
+            "image_b64": base64.b64encode(jpeg).decode()})
 
     async def validate_destination(self, session_id: str, dest: Destination) -> Verdict:
         return self._verdict(await self._request(

@@ -1,7 +1,7 @@
-import { useState, type ComponentType, type ReactNode, type SVGProps } from 'react'
+import { useEffect, useState, type ComponentType, type ReactNode, type SVGProps } from 'react'
 import { DailyChart } from '../components/DailyChart'
 import { AlertIcon, BottleIcon, CheckCircleIcon, ClockIcon, ReturnIcon, RupeeIcon, WifiIcon, XCircleIcon } from '../components/Icons'
-import { post, type AlertRow, type AuditRow, type ClaimRow, type MachineRow, type SessionRow, type SmsRow, type Stats, type TxnRow } from '../api'
+import { fetchImage, post, type AlertRow, type AuditRow, type ClaimRow, type MachineRow, type SessionRow, type SmsRow, type Stats, type TxnRow } from '../api'
 import { Badge, Btn, ErrorText, Field, inputCls, Modal, mono, Table, fmtTime, rupees, usePoll } from '../ui'
 
 export interface PageProps {
@@ -271,19 +271,71 @@ export function Transactions({ can }: PageProps) {
   )
 }
 
+/** The machine camera's photo of a rejected bottle (proof of the rejection). */
+function EvidenceModal({ session, lane, onClose }: { session: SessionRow; lane: number; onClose: () => void }) {
+  const [img, setImg] = useState<{ url: string; reason: string; at: string } | null>(null)
+  const [err, setErr] = useState('')
+  useEffect(() => {
+    let url = ''
+    fetchImage(`/sessions/${session.id}/bottles/${lane}/evidence`).then(
+      (r) => {
+        url = r.url
+        setImg({ url: r.url, reason: r.headers.get('X-Evidence-Reason') ?? '', at: r.headers.get('X-Evidence-At') ?? '' })
+      },
+      (e) => setErr((e as Error).message),
+    )
+    return () => { if (url) URL.revokeObjectURL(url) }
+  }, [session.id, lane])
+  return (
+    <Modal title={`Rejection evidence · bottle ${lane}`} onClose={onClose}>
+      {img ? (
+        <div className="space-y-3">
+          <img src={img.url} alt="Rejected bottle" className="w-full rounded-lg ring-1 ring-slate-200" />
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
+            <dt className="text-slate-500">Reason</dt><dd><Badge value={img.reason} /></dd>
+            <dt className="text-slate-500">Taken</dt><dd>{fmtTime(img.at)}</dd>
+            <dt className="text-slate-500">Machine</dt><dd>{session.machine_id}</dd>
+            <dt className="text-slate-500">Session</dt><dd>{mono(session.id)}</dd>
+          </dl>
+          <a href={img.url} download={`evidence-${session.id}-${lane}.jpg`} className="inline-block text-sm font-semibold text-brand-700 hover:underline">
+            Download photo
+          </a>
+        </div>
+      ) : err ? <ErrorText>{err}</ErrorText> : <p className="text-sm text-slate-500">Loading…</p>}
+    </Modal>
+  )
+}
+
 export function Sessions() {
   const [outcome, setOutcome] = useState('')
+  const [photo, setPhoto] = useState<{ session: SessionRow; lane: number } | null>(null)
   const { data } = usePoll<SessionRow[]>(`/sessions?limit=200${outcome ? `&outcome=${outcome}` : ''}`)
   return (
     <>
       <Filters value={outcome} onChange={setOutcome} options={[['', 'All'], ['ACCEPTED', 'Accepted'], ['RETURNED', 'Returned'], ['IN_PROGRESS', 'In progress']]} />
       <Table
-        head={['Started', 'Session', 'Machine', 'Brand', 'Refund QR', 'Mfg QR', 'Outcome', 'Reason']}
+        head={['Started', 'Session', 'Machine', 'Bottles', 'Brand', 'Refund QR', 'Outcome', 'Reason']}
         rows={(data ?? []).map((s) => [
-          fmtTime(s.started_at), mono(s.id.slice(0, 12)), s.machine_id, s.brand ?? '—',
-          mono(s.refund_serial), mono(s.mfg_serial), <Badge value={s.outcome} />, s.reason ?? '—',
+          fmtTime(s.started_at), mono(s.id.slice(0, 12)), s.machine_id,
+          <div className="space-y-1">
+            {s.bottles.map((b) => (
+              <div key={b.lane} className="flex items-center gap-2 text-xs">
+                <span className="text-slate-400">#{b.lane}</span>
+                <Badge value={b.status} />
+                {b.reason && b.status !== 'ACCEPTED' && <span className="text-slate-600">{b.reason}</span>}
+                {b.evidence && (
+                  <button onClick={() => setPhoto({ session: s, lane: b.lane })}
+                    className="rounded-md bg-red-50 px-2 py-0.5 font-semibold text-red-700 ring-1 ring-red-200 hover:bg-red-100">
+                    📷 Evidence
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>,
+          s.brand ?? '—', mono(s.refund_serial), <Badge value={s.outcome} />, s.reason ?? '—',
         ])}
       />
+      {photo && <EvidenceModal session={photo.session} lane={photo.lane} onClose={() => setPhoto(null)} />}
     </>
   )
 }

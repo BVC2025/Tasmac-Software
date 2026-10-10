@@ -10,6 +10,13 @@ class VerdictOut(BaseModel):
     data: dict = Field(default_factory=dict)
 
 
+class EvidenceIn(BaseModel):
+    reason: str = Field(max_length=64)
+    content_type: str = Field(default="image/jpeg", pattern="^image/(jpeg|png)$")
+    image_b64: str = Field(max_length=4_000_000)            # ~3 MB image
+    box: list[float] | None = Field(default=None, max_length=4)
+
+
 class ClassifyIn(BaseModel):
     codes: list[str] = Field(max_length=16)
     record: bool = True   # False: only look up, do not log unknown codes

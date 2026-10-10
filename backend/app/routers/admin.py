@@ -9,7 +9,7 @@ import io
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
@@ -19,7 +19,7 @@ from .. import qr as qrfmt
 from .. import services as svc
 from ..db import get_db
 from ..models import (
-    AdminUser, Alert, AuditLog, BottleState, EligibleBrand, Machine, QrCode, RefundClaim, Role, RvmSession, SessionBottle,
+    AdminUser, Alert, AuditLog, BottleEvidence, BottleState, EligibleBrand, Machine, QrCode, RefundClaim, Role, RvmSession, SessionBottle,
     SmsMessage, Transaction, TxnStatus, utcnow,
 )
 from ..schemas import MachineOut, ServiceWindow, StatsOut, TxnAdminOut
@@ -352,15 +352,32 @@ async def sessions(machine_id: str | None = None, outcome: str | None = None,
     rows = (await db.execute(q)).scalars().all()
     bottles: dict[str, list] = {}
     if rows:
-        res = await db.execute(select(SessionBottle).where(SessionBottle.session_id.in_([r.id for r in rows]))
+        ids = [r.id for r in rows]
+        photos = set((await db.execute(select(BottleEvidence.session_id, BottleEvidence.lane)
+                                       .where(BottleEvidence.session_id.in_(ids)))).all())
+        res = await db.execute(select(SessionBottle).where(SessionBottle.session_id.in_(ids))
                                .order_by(SessionBottle.lane))
         for b in res.scalars():
             bottles.setdefault(b.session_id, []).append(
                 {"lane": b.lane, "status": b.status, "reason": b.reason, "brand": b.brand,
-                 "refund_serial": b.refund_serial, "mfg_serial": b.mfg_serial})
+                 "refund_serial": b.refund_serial, "mfg_serial": b.mfg_serial,
+                 "evidence": (b.session_id, b.lane) in photos})
     return [{"id": r.id, "machine_id": r.machine_id, "refund_serial": r.refund_serial, "mfg_serial": r.mfg_serial,
              "brand": r.brand, "outcome": r.outcome, "reason": r.reason, "started_at": r.started_at,
              "ended_at": r.ended_at, "bottles": bottles.get(r.id, [])} for r in rows]
+
+
+@router.get("/sessions/{session_id}/bottles/{lane}/evidence")
+async def evidence_photo(session_id: str, lane: int, db: AsyncSession = Depends(get_db)):
+    """The machine's photo of a rejected bottle."""
+    e = (await db.execute(select(BottleEvidence).where(
+        BottleEvidence.session_id == session_id, BottleEvidence.lane == lane))).scalar_one_or_none()
+    if e is None:
+        raise HTTPException(404, "No evidence photo")
+    return Response(e.image, media_type=e.content_type, headers={
+        "Cache-Control": "private, max-age=300",
+        "X-Evidence-Reason": e.reason, "X-Evidence-At": e.created_at.isoformat(),
+        "Access-Control-Expose-Headers": "X-Evidence-Reason, X-Evidence-At"})
 
 
 @router.get("/sms")

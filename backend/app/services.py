@@ -20,7 +20,7 @@ from . import qr
 from .alerts import raise_alert
 from .config import get_settings
 from .models import (
-    AlertType, AuditLog, BottleState, BottleStatus, SessionBottle, ClaimStatus, EligibleBrand, Machine, QrCode, RefundClaim,
+    AlertType, AuditLog, BottleEvidence, BottleState, BottleStatus, SessionBottle, ClaimStatus, EligibleBrand, Machine, QrCode, RefundClaim,
     RvmSession, SmsMessage, Transaction, TxnStatus, utcnow,
 )
 from .providers import PayoutResult, get_payout_provider, get_sms_provider
@@ -278,6 +278,20 @@ async def bottle_rejected(db: AsyncSession, machine: Machine, session_id: str, l
     for claim in res.scalars():
         claim.status, claim.reserved_until = ClaimStatus.RELEASED, None
     audit(db, f"machine:{machine.id}", "BOTTLE_REJECTED", "session", session_id, lane=lane, reason=reason)
+    await db.commit()
+
+
+async def store_evidence(db: AsyncSession, machine: Machine, session_id: str, lane: int, reason: str,
+                         content_type: str, image: bytes, box: list[float] | None) -> None:
+    """Keep the machine's photo of a rejected bottle (a resend replaces it)."""
+    await get_or_create_session(db, machine, session_id)
+    await db.execute(pg_insert(BottleEvidence).values(
+        session_id=session_id, machine_id=machine.id, lane=lane, reason=reason, content_type=content_type,
+        image=image, box=box, created_at=utcnow(),
+    ).on_conflict_do_update(constraint="uq_evidence_session_lane",
+                            set_={"reason": reason, "content_type": content_type, "image": image, "box": box}))
+    audit(db, f"machine:{machine.id}", "REJECTION_EVIDENCE", "session", session_id, lane=lane, reason=reason,
+          bytes=len(image))
     await db.commit()
 
 

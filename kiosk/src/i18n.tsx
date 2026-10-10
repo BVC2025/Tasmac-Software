@@ -138,6 +138,7 @@ const en = {
   today: 'today',
   tomorrow: 'tomorrow',
   closedThanks: 'Please come back during service hours. Thank you!',
+  evidenceCaption: 'Photo taken by the machine camera',
   reasons: {
     BOTTLE_DAMAGED: 'The bottle is damaged',
     BOTTLE_FOREIGN: 'This item is not an accepted bottle',
@@ -304,6 +305,7 @@ const ta: Strings = {
   today: 'இன்று',
   tomorrow: 'நாளை',
   closedThanks: 'சேவை நேரத்தில் வாருங்கள். நன்றி!',
+  evidenceCaption: 'இயந்திர கேமரா எடுத்த படம்',
   reasons: {
     BOTTLE_DAMAGED: 'பாட்டில் சேதமடைந்துள்ளது',
     BOTTLE_FOREIGN: 'இது ஏற்கப்படும் பாட்டில் அல்ல',

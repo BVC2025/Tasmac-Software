@@ -93,6 +93,7 @@ class MachineConfig(BaseModel):
     # The admin portal setting (sent with every heartbeat) replaces this and is kept in service_hours_path.
     service_hours: list[dict] = Field(default_factory=list)
     service_hours_path: str | None = "data/service_hours.json"
+    evidence_dir: str | None = "data/evidence"   # photos of bottles the camera rejected
     plc: PLCConfig = Field(default_factory=PLCConfig)
     simulator: SimulatorConfig = Field(default_factory=SimulatorConfig)
     flow: FlowConfig = Field(default_factory=FlowConfig)

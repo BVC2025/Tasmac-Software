@@ -60,7 +60,9 @@ class MockInspector(BottleInspector):
         cond = self.feed.at(lane).condition
         if cond == "ok":
             return InspectionResult(ok=True, confidence=0.97)
-        return InspectionResult(ok=False, reason=cond.upper(), confidence=0.93)
+        # where the damage is (normalised x, y, w, h) and in which frame, as a real model would report it
+        details = {"box": [0.40, 0.46, 0.22, 0.2], "frame": 1} if cond == "damaged" else {"frame": 0}
+        return InspectionResult(ok=False, reason=cond.upper(), confidence=0.93, details=details)
 
 
 class MockQRReader(QRReader):

@@ -8,6 +8,7 @@ import { useLang } from '../i18n'
 import { normalizeMobile } from '../lib/upi'
 import { useVoice } from '../voice'
 import type { Ev, MachineView, SessionResult } from '../useMachine'
+import { EvidencePhoto } from '../components/EvidencePhoto'
 import { KeypadInput, SmsMobileStep } from './KeypadInput'
 import { BatchSummary, rupees as toRupees } from './StatusScreens'
 import { QrScan } from './QrScan'
@@ -258,6 +259,13 @@ export function Result({ result, confirm, onDone }: { result: SessionResult; con
         {failed ? t.refundFailed : result.reason === 'CUSTOMER_CANCELLED' ? t.cancelledTitle : t.returnedTitle}
       </Title>
       {result.bottles.length > 1 && <div className="mb-4 w-full"><BatchSummary lanes={result.bottles} /></div>}
+      {result.bottles.some((b) => b.evidence) && (
+        <div className="mb-6 flex w-full flex-wrap justify-center gap-4">
+          {result.bottles.filter((b) => b.evidence).map((b) => (
+            <EvidencePhoto key={b.lane} sessionId={result.session_id} lane={b.lane} compact={result.bottles.length > 1} />
+          ))}
+        </div>
+      )}
       {result.txn_id && <p className="mb-4 rounded-lg bg-slate-200/70 px-4 py-2 font-mono text-lg text-slate-700">{t.txnId}: {result.txn_id}</p>}
       {failed && <p className="mt-2 rounded-2xl bg-red-600 px-8 py-4 text-xl font-bold text-white shadow">{t.contactStaff}</p>}
       <Button variant="secondary" className="mt-10 w-full max-w-md" onClick={onDone}>

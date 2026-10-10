@@ -26,6 +26,7 @@ def fast_config(port: int) -> MachineConfig:
         simulator=SimulatorConfig(enabled=True, time_scale=0.05),
         session_log_path=":memory:",
         service_hours_path=None,   # never pick up a dev machine's saved hours
+        evidence_dir=None,
         flow=FlowConfig(
             payout_poll_interval_s=0.05, payout_pending_wait_s=0.3,
             fault_retry_interval_s=0.2, hand_retry_interval_s=0.1,

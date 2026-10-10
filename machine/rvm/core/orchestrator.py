@@ -32,6 +32,7 @@ from ..plc.registers import Cmd, CmdResult, LaneSensor, Sensor
 from ..services import qr_codec
 from ..services.backend import Backend, Destination, PayoutStatus
 from ..services.customer import CustomerInterface
+from ..services.evidence import EvidenceStore, make_evidence
 from ..services.session_log import SessionLog
 from ..services.vision import BottleInspector, Camera, Frame, QRReader
 from .events import EventBus, LaneStep, MachineState
@@ -75,6 +76,7 @@ class Bottle:
     amount_paise: int = 0
     brand: str | None = None    # from the manufacturing QR (shown on the kiosk)
     step_at: float = 0.0        # loop time the current step was shown (demo step hold)
+    evidence: bool = False      # a photo proves why the camera rejected it
     reason: str = ""
     handed_back: bool = False   # physically returned to the inlet
 
@@ -102,7 +104,8 @@ class Session:
         return sum(b.amount_paise for b in self.held)
 
     def summary(self) -> list[dict]:
-        return [{"lane": b.lane, "step": b.step.value, "reason": b.reason} for b in sorted(self.bottles.values(), key=lambda b: b.lane)]
+        return [{"lane": b.lane, "step": b.step.value, "reason": b.reason, "evidence": b.evidence}
+                for b in sorted(self.bottles.values(), key=lambda b: b.lane)]
 
 
 class Orchestrator:
@@ -137,6 +140,7 @@ class Orchestrator:
         stored = self._hours_store.load()
         self.service_hours = ServiceHours(stored if stored is not None else cfg.service_hours)
         self._clock = lambda: datetime.now(IST)    # tests replace this
+        self.evidence = EvidenceStore(cfg.evidence_dir)
 
     def set_service_hours(self, windows: list[dict] | None) -> None:
         """New service hours from the server (heartbeat reply); remembered for offline use."""
@@ -374,6 +378,8 @@ class Orchestrator:
             session.outcome = "RETURNED"
             session.reason = rejected[0].reason if rejected else "NO_BOTTLE"
             self._set_state(MachineState.REJECTING, reason=session.reason, bottles=session.summary())
+            # close the session on the server too (else it stays IN_PROGRESS in the admin portal)
+            await self._safe_backend(self.backend.bottle_returned(session.id, session.reason))
             self._message("TAKE_BACK_BOTTLE")
             return
 
@@ -425,7 +431,9 @@ class Orchestrator:
                 await self._capture_and_rotate(b)
             result = await self.inspector.inspect(ln, b.frames)
             if not result.ok:
-                raise LaneRejected(f"BOTTLE_{result.reason or 'INVALID'}")
+                reason = f"BOTTLE_{result.reason or 'INVALID'}"
+                await self._record_evidence(session, b, result, reason)
+                raise LaneRejected(reason)
 
             await self._show_step(b, LaneStep.SCANNING_REFUND_QR)
             b.refund_qr = await self._find_qr(b, "refund")
@@ -467,8 +475,20 @@ class Orchestrator:
                 await self.plc.command(Cmd.REJECT_BOTTLE, lane=ln)
                 b.handed_back = True
             await self._safe_backend(self.backend.bottle_rejected(session.id, ln, r.reason))
-            await self._show_step(b, LaneStep.REJECTED)
+            await self._show_step(b, LaneStep.REJECTED, evidence=b.evidence, session_id=session.id)
             self._message("BOTTLE_REJECTED", lane=ln, reason=r.reason)
+
+    async def _record_evidence(self, session: Session, b: Bottle, result, reason: str) -> None:
+        """Photo of a bottle the camera rejected: saved here, shown on the kiosk, sent to the server.
+        Never blocks handing the bottle back."""
+        try:
+            jpeg = await asyncio.to_thread(make_evidence, b.frames, result, b.lane, self.cfg.simulator.enabled)
+            self.evidence.save(session.id, b.lane, jpeg)
+            b.evidence = True
+            await self._safe_backend(self.backend.bottle_evidence(
+                session.id, b.lane, reason, jpeg, result.details.get("box")))
+        except Exception:
+            log.exception("Could not record rejection evidence for lane %s", b.lane)
 
     async def _close_inlet(self, lane: int) -> None:
         for _ in range(self.flow.close_inlet_retries):

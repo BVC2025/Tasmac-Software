@@ -6,7 +6,7 @@ Money is stored in paise (integer). All timestamps are UTC.
 from datetime import datetime, timezone
 from enum import Enum
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Index, Integer, LargeBinary, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -130,6 +130,24 @@ class SessionBottle(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     __table_args__ = (UniqueConstraint("session_id", "lane", name="uq_session_bottle_lane"),)
+
+
+class BottleEvidence(Base):
+    """Photo proving why the machine's camera rejected a bottle (damaged / not a bottle)."""
+
+    __tablename__ = "bottle_evidence"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    session_id: Mapped[str] = mapped_column(ForeignKey("rvm_sessions.id"), index=True)
+    machine_id: Mapped[str] = mapped_column(ForeignKey("machines.id"))
+    lane: Mapped[int] = mapped_column(Integer)
+    reason: Mapped[str] = mapped_column(String(64))
+    content_type: Mapped[str] = mapped_column(String(32))
+    image: Mapped[bytes] = mapped_column(LargeBinary)
+    box: Mapped[list | None] = mapped_column(JSON)          # damaged area, normalised [x, y, w, h]
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+
+    __table_args__ = (UniqueConstraint("session_id", "lane", name="uq_evidence_session_lane"),)
 
 
 class Transaction(Base):

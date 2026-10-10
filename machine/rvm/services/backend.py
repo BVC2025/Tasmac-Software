@@ -94,6 +94,10 @@ class Backend(ABC):
     async def bottle_rejected(self, session_id: str, lane: int, reason: str) -> None:
         """A bottle of the batch was rejected and handed back (releases its reservation, if any)."""
 
+    async def bottle_evidence(self, session_id: str, lane: int, reason: str, jpeg: bytes,
+                              box: list[float] | None = None) -> None:
+        """Photo proving why the camera rejected a bottle (damaged / not a bottle). No-op for mocks."""
+
     @abstractmethod
     async def validate_destination(self, session_id: str, dest: Destination) -> Verdict:
         """Check the UPI ID / mobile exists. data may contain 'name' for display."""
@@ -128,6 +132,7 @@ class MockBackend(Backend):
         self.consumed_mfg: set[str] = set()
         self.reservations: dict[tuple[str, int], tuple[str, str]] = {}   # (session, lane) -> (refund, mfg)
         self.rejected: list[tuple[str, int, str]] = []
+        self.evidence: list[tuple[str, int, str, int]] = []   # (session, lane, reason, jpeg size)
         self.transactions: dict[str, dict] = {}
         self._txn_by_session: dict[str, str] = {}
         self.sms_log: list[str] = []
@@ -179,6 +184,10 @@ class MockBackend(Backend):
     async def bottle_rejected(self, session_id: str, lane: int, reason: str) -> None:
         self.reservations.pop((session_id, lane), None)
         self.rejected.append((session_id, lane, reason))
+
+    async def bottle_evidence(self, session_id: str, lane: int, reason: str, jpeg: bytes,
+                              box: list[float] | None = None) -> None:
+        self.evidence.append((session_id, lane, reason, len(jpeg)))
 
     async def validate_destination(self, session_id: str, dest: Destination) -> Verdict:
         if dest.value.startswith("invalid"):

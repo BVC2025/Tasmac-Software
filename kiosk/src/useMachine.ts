@@ -9,9 +9,12 @@ export interface LaneView {
   reason?: string | null
   amount_paise?: number
   brand?: string | null // from the manufacturing QR
+  evidence?: boolean // the camera took a photo proving why it was rejected
+  session_id?: string
 }
 
 export interface SessionResult {
+  session_id: string
   outcome: string // ACCEPTED | RETURNED | CANCELLED | ABORTED
   reason: string
   txn_id: string | null
@@ -102,14 +105,17 @@ function reducer(s: MachineView, a: Action): MachineView {
         ...s,
         lanes: {
           ...s.lanes,
-          [ev.lane]: { lane: ev.lane, step: ev.step, reason: ev.reason, amount_paise: ev.amount_paise, brand: ev.brand ?? s.lanes[ev.lane]?.brand },
+          [ev.lane]: {
+            lane: ev.lane, step: ev.step, reason: ev.reason, amount_paise: ev.amount_paise,
+            brand: ev.brand ?? s.lanes[ev.lane]?.brand, evidence: !!ev.evidence, session_id: ev.session_id,
+          },
         },
       }
     case 'session_ended':
       return {
         ...s,
         result: {
-          outcome: ev.outcome, reason: ev.reason, txn_id: ev.txn_id, final: s.final, sms: !!s.confirm?.sms,
+          session_id: ev.session_id, outcome: ev.outcome, reason: ev.reason, txn_id: ev.txn_id, final: s.final, sms: !!s.confirm?.sms,
           amount_paise: ev.amount_paise ?? 0, accepted: ev.accepted ?? 0, bottles: ev.bottles ?? [], at: Date.now(),
         },
       }

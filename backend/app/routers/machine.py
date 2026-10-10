@@ -1,15 +1,17 @@
 """API used by the RVM machines. Auth: X-Machine-Id + X-Api-Key headers."""
 
+import base64
+import binascii
 from dataclasses import asdict
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .. import services as svc
 from ..db import get_db
 from ..models import Machine
 from ..schemas import (
-    AcceptedIn, BottleRejectedIn, ClassifyIn, DestinationIn, EligibilityIn, HeartbeatIn, QRIn, ReturnedIn, TransactionIn, TxnOut,
+    AcceptedIn, BottleRejectedIn, ClassifyIn, EvidenceIn, DestinationIn, EligibilityIn, HeartbeatIn, QRIn, ReturnedIn, TransactionIn, TxnOut,
     VerdictOut,
 )
 from ..security import current_machine
@@ -53,6 +55,22 @@ async def eligibility(session_id: str, body: EligibilityIn, m: Machine = Depends
 async def bottle_rejected(session_id: str, lane: int, body: BottleRejectedIn, m: Machine = Depends(current_machine),
                           db: AsyncSession = Depends(get_db)):
     await svc.bottle_rejected(db, m, session_id, lane, body.reason)
+
+
+@router.post("/sessions/{session_id}/bottles/{lane}/evidence", status_code=204)
+async def bottle_evidence(session_id: str, lane: int, body: EvidenceIn, m: Machine = Depends(current_machine),
+                          db: AsyncSession = Depends(get_db)):
+    """Photo of a bottle the camera rejected (proof shown in the admin portal)."""
+    try:
+        image = base64.b64decode(body.image_b64, validate=True)
+    except (binascii.Error, ValueError):
+        raise HTTPException(422, "image_b64 is not valid base64")
+    magic = {"image/jpeg": b"\xff\xd8\xff", "image/png": b"\x89PNG"}[body.content_type]
+    if not image.startswith(magic):
+        raise HTTPException(422, "Not a JPEG / PNG image")
+    if not 1 <= lane <= 3:
+        raise HTTPException(422, "Invalid lane")
+    await svc.store_evidence(db, m, session_id, lane, body.reason, body.content_type, image, body.box)
 
 
 @router.post("/sessions/{session_id}/destination", response_model=VerdictOut)
